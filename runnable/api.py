@@ -1,13 +1,13 @@
 import os
 from typing import Dict
 
-# from gevent import monkey
-#
-# monkey.patch_all()
+from gevent import monkey
+
+monkey.patch_all()
 
 from threading import Thread
 
-# from gevent.pywsgi import WSGIServer
+from gevent.pywsgi import WSGIServer
 from flask import Flask, request, Request
 from PIL import Image
 from io import BytesIO
@@ -412,20 +412,20 @@ def recogniseRoute(userUID, deviceUID):
     )
 
 
-# connectDB()
-# WSGIServer(
-#     (
-#         "127.0.0.1",
-#         Constants.coreServerPort.value,
-#     ),
-#     recognitionServer,
-#     log=None,
-# ).serve_forever()
+connectDB()
+WSGIServer(
+    (
+        "127.0.0.1",
+        Constants.coreServerPort.value,
+    ),
+    recognitionServer,
+    log=None,
+).serve_forever()
 
 
-if __name__ == "__main__":
-    print(
-        fetchDurationGPT(
-            ["Pineapple", "Banana", "Chicken thigh", "Pork ribs", "Fresh lentils"]
-        )
-    )
+# if __name__ == "__main__":
+#     print(
+#         fetchDurationGPT(
+#             ["Pineapple", "Banana", "Chicken thigh", "Pork ribs", "Fresh lentils"]
+#         )
+#     )
