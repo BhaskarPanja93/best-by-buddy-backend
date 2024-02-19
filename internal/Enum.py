@@ -1,16 +1,17 @@
 from enum import Enum
+from pathlib import Path
 
 
 class RequiredFiles(Enum):
     folderLocation = r"C:\FILES\AllProjects\Python\best-by-buddy"
     common = [
-        folderLocation.value+r"\internal\AutoReRun.py",
-        folderLocation.value+r"\internal\CustomResponse.py",
-        folderLocation.value+r"\internal\Enum.py",
-        folderLocation.value+r"\internal\Logger.py",
-        folderLocation.value+r"\internal\MysqlPool.py",
-        folderLocation.value+r"\internal\StringGenerator.py",
-        folderLocation.value+r"\internal\MysqlPool.py",
+        Path(folderLocation, r"\internal\AutoReRun.py"),
+        Path(folderLocation, r"\internal\CustomResponse.py"),
+        Path(folderLocation, r"\internal\Enum.py"),
+        Path(folderLocation, r"\internal\Logger.py"),
+        Path(folderLocation, r"\internal\MysqlPool.py"),
+        Path(folderLocation, r"\internal\StringGenerator.py"),
+        Path(folderLocation, r"\internal\MysqlPool.py"),
     ]
     
 
