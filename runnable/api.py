@@ -1,4 +1,5 @@
 import os
+from typing import Dict
 
 from gevent import monkey
 
@@ -13,6 +14,8 @@ from base64 import b64encode, b64decode
 from requests import Session
 from json import loads
 from functools import wraps
+from dateutil.relativedelta import relativedelta
+from datetime import datetime
 
 from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods
 from internal.Logger import Logger
@@ -112,10 +115,57 @@ def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
         return 422, "PARSE_FAIL", []
 
 
+def understandGPTResponseText(
+    responseContent: str,
+) -> tuple[int, str, Dict[str, datetime]]:
+    """
+    Tries all known GPT response types and processes the final expiry date recommendations recognized from the given
+    JSON from GPT response
+    :param responseContent: Response from GPT
+    :return: status code and dictionary of items with suggested expiry date
+    """
+    try:
+        return 200, "", parse_expiry_suggestions(responseContent)
+    except:
+        return 422, "PARSE_FAIL", {}
+
+
+def parse_expiry_suggestions(responseContent: str) -> Dict[str, datetime]:
+    parsed = dict()
+    mapping = loads(responseContent)
+    for groceries in mapping:
+        for item, expiry_date in groceries.items():
+            parsed[item] = parse_str_to_datetime(duration_str=expiry_date)
+
+    return parsed
+
+
+def parse_str_to_datetime(duration_str) -> datetime:
+    """
+    Parses a duration string (e.g., "30 D", "2 W", "3 M") and returns a relativedelta object.
+    - "D" stands for days
+    - "W" stands for weeks
+    - "M" stands for months
+    """
+    num, unit = duration_str.split()
+    num = int(num)
+    now = datetime.now()
+
+    if unit == "D":
+        return now + relativedelta(days=num)
+    elif unit == "W":
+        return now + relativedelta(weeks=num)
+    elif unit == "M":
+        return now + relativedelta(months=num)
+    else:
+        raise ValueError("Unknown duration unit")
+
+
 def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
     payload = {
         "max_tokens": 1000,
-        "model": "gpt-4-turbo-preview	",
+        "model": "gpt-4-1106-preview",
+        "response_format": {"type": "json_object"},
         "messages": [
             {
                 "role": "user",
@@ -140,9 +190,9 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
                         Example Output JSON (with hypothetical, not actually correct durations, just to show correct 
                         use of duration format):
                         {{ 
-                            "Apple": "1 M", 
-                            "Grape": "7 D", 
-                            "Yogurt": "100 H" 
+                            "Apple": "1 W", 
+                            "Grape": "4 D", 
+                            "Egg": "1 M" 
                         }} 
                         """,
                     },
@@ -150,9 +200,11 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
             }
         ],
     }
-    send_request(payload=payload)
+    statusCode, statusDesc, itemsWithExpiryDate = send_request(
+        payload=payload, is_image=False
+    )
 
-    pass
+    return statusCode, statusDesc, itemsWithExpiryDate
 
 
 def recogniseImageGPT(imgBytes: bytes) -> tuple[int, str, list]:
@@ -196,26 +248,35 @@ def recogniseImageGPT(imgBytes: bytes) -> tuple[int, str, list]:
             }
         ],
     }
-    recognisedItemList, statusCode, statusDesc = send_request(payload)
+    recognisedItemList, statusCode, statusDesc = send_request(payload, is_image=True)
     return statusCode, statusDesc, recognisedItemList
 
 
-def send_request(payload):
+def send_request(payload, is_image):
     try:
         gtpSession = Session()
         gtpSession.headers = GPTElements.headers.value
         responseJSON = gtpSession.post(
             "https://api.openai.com/v1/chat/completions", json=payload
         ).json()
+        print(f"{responseJSON=}")
         responseContent = responseJSON["choices"][0]["message"]["content"]
-        statusCode, statusDesc, recognisedItemList = understandGPTResponseImage(
-            responseContent
-        )
+        if is_image:
+            statusCode, statusDesc, response = understandGPTResponseImage(
+                responseContent
+            )
+        else:  # Text
+            statusCode, statusDesc, response = understandGPTResponseText(
+                responseContent
+            )
+
     except Exception as e:
+        print(f"{e=}")
         statusCode = 422
         statusDesc = "GPT_POST_ERROR"
         logger.fatal("GPTPOST", repr(e))
-    return recognisedItemList, statusCode, statusDesc
+        response = [] if is_image else {}
+    return statusCode, statusDesc, response
 
 
 def saveImage(imgBytes, purchaseUID) -> None:
@@ -351,12 +412,20 @@ def recogniseRoute(userUID, deviceUID):
     )
 
 
-connectDB()
-WSGIServer(
-    (
-        "127.0.0.1",
-        Constants.coreServerPort.value,
-    ),
-    recognitionServer,
-    log=None,
-).serve_forever()
+# connectDB()
+# WSGIServer(
+#     (
+#         "127.0.0.1",
+#         Constants.coreServerPort.value,
+#     ),
+#     recognitionServer,
+#     log=None,
+# ).serve_forever()
+
+
+if __name__ == "__main__":
+    print(
+        fetchDurationGPT(
+            ["Pineapple", "Banana", "Chicken thigh", "Pork ribs", "Fresh lentils"]
+        )
+    )
