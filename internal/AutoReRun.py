@@ -27,7 +27,6 @@ To run any program that is not a python file, remove the keyword `executable` fr
     E.g. Popen(["taskkill /f /t /pid"]+["1234"])
 """
 
-
 from subprocess import Popen
 from time import sleep
 from sys import executable
@@ -36,7 +35,9 @@ from os import stat
 
 
 class AutoReRun(Thread):
-    def __init__(self, toRun:dict[str, list[str]], toCheck:list, reCheckInterval:int=1):
+    def __init__(
+        self, toRun: dict[str, list[str]], toCheck: list, reCheckInterval: int = 1
+    ):
         Thread.__init__(self)
         self.programsToRun = toRun
         self.programsToCheck = toCheck
@@ -44,7 +45,6 @@ class AutoReRun(Thread):
         self.reCheckInterval = reCheckInterval
         self.lastFileStat = self.fetchFileStats()
         self.startPrograms()
-
 
     def run(self):
         """
@@ -56,24 +56,22 @@ class AutoReRun(Thread):
                 self.startPrograms()
             sleep(self.reCheckInterval)
 
-
-    def fetchFileStats(self)->list:
+    def fetchFileStats(self) -> list:
         """
         Checks current file state
         Returns a list containing tuples containing each file and its last modified state
         If a to-be-checked file gets added, or goes missing, it is treated as a file update
         :return:
         """
-        tempStats:list[tuple[str, float]] = []
+        tempStats: list[tuple[str, float]] = []
         for filename in self.programsToCheck:
             try:
                 tempStats.append((filename, stat(filename).st_mtime))
-            except: ## file is not present
+            except:  ## file is not present
                 pass
         return tempStats
 
-
-    def checkForUpdates(self)->bool:
+    def checkForUpdates(self) -> bool:
         """
         Checks if current file state matches old known state
         Returns a boolean if current received file state differs from the last known state
@@ -85,7 +83,6 @@ class AutoReRun(Thread):
             return True
         else:
             return False
-
 
     def startPrograms(self):
         """
@@ -101,4 +98,6 @@ class AutoReRun(Thread):
                 _process.wait()
                 self.currentProcesses.remove(_process)
         for program in self.programsToRun:
-            self.currentProcesses.append(Popen([executable, program]+self.programsToRun[program]))
+            self.currentProcesses.append(
+                Popen([executable, program] + self.programsToRun[program])
+            )

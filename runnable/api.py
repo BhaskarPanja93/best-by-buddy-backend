@@ -1,4 +1,7 @@
+import os
+
 from gevent import monkey
+
 monkey.patch_all()
 
 from threading import Thread
@@ -17,16 +20,13 @@ from internal.StringGenerator import randomGenerator
 from internal.CustomResponse import CustomResponse
 from internal.MysqlPool import mysqlPool as MySQLPool
 
-
-
 STATIC_FOLDER = "savedimages/"
 COMPRESS_IMAGES = False
 RECOGNISE_IMAGE = False
 RECOGNISE_DATES = False
 DELETE_IMAGE_FILES = False
 
-
-mysqlPool:MySQLPool|None = None
+mysqlPool: MySQLPool | None = None
 logger = Logger()
 stringGen = randomGenerator()
 recognitionServer = Flask("RECOGNITION_API")
@@ -39,9 +39,14 @@ def connectDB() -> None:
     :return: None
     """
     global mysqlPool
-    for host in ["127.0.0.1", "192.168.1.2", "bhindi1.ddns.net"]:
+    for host in [os.getenv("DNS_SERVER")]:
         try:
-            mysqlPool = MySQLPool(user="root", password=Secrets.DBPassword.value, dbName="bestbybuddy", host=host)
+            mysqlPool = MySQLPool(
+                user="root",
+                password=Secrets.DBPassword.value,
+                dbName="bestbybuddy",
+                host=host,
+            )
             mysqlPool.execute("show databases")
             logger.success("DB", f"connected to: {host}")
             break
@@ -53,8 +58,7 @@ def connectDB() -> None:
         exit(0)
 
 
-
-def fetchDurationDB(itemName:str) -> tuple[int, str, str]:
+def fetchDurationDB(itemName: str) -> tuple[int, str, str]:
     """
     Fetch Duration from database or return None
     :param itemName:
@@ -63,10 +67,14 @@ def fetchDurationDB(itemName:str) -> tuple[int, str, str]:
     statusCode = 500
     statusDesc = "DUR_UNAVAILABLE"
     itemDuration = ""
-    itemUIDTupList = mysqlPool.execute(f"SELECT item_uid from known_items where name=\"{itemName}\"")
+    itemUIDTupList = mysqlPool.execute(
+        f'SELECT item_uid from known_items where name="{itemName}"'
+    )
     if itemUIDTupList and itemUIDTupList[0][0]:
         itemUID = itemUIDTupList[0][0]
-        itemDurationTupList = mysqlPool.execute(f"SELECT duration from known_items where item_uid=\"{itemUID}\"")
+        itemDurationTupList = mysqlPool.execute(
+            f'SELECT duration from known_items where item_uid="{itemUID}"'
+        )
         if itemDurationTupList and itemUIDTupList[0][0]:
             itemDuration = itemDurationTupList[0][0]
             statusCode = 200
@@ -74,8 +82,7 @@ def fetchDurationDB(itemName:str) -> tuple[int, str, str]:
     return statusCode, statusDesc, itemDuration
 
 
-
-def attachExpiry(itemList:list) -> tuple[int, str, dict]:
+def attachExpiry(itemList: list) -> tuple[int, str, dict]:
     expiryAttachedDict = {}
     unknownItems = []
     for item in itemList:
@@ -90,8 +97,7 @@ def attachExpiry(itemList:list) -> tuple[int, str, dict]:
     return 200, "", expiryAttachedDict
 
 
-
-def understandGPTResponseImage(responseContent:str) -> tuple[int, str, list]:
+def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
     """
     Tries all known GPT response types and processes the final image recognized JSON from GPT response
     :param responseContent: Response from GPT
@@ -144,21 +150,15 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
     pass
 
 
-
-def recogniseImageGPT(imgBytes:bytes) -> tuple[int, str, list]:
+def recogniseImageGPT(imgBytes: bytes) -> tuple[int, str, list]:
     """
     Fetch list of items in the image from GPT, or a dummy response if asked for
     :param imgBytes: raw bytes of the image file received from client.
     :return:
     """
     if not RECOGNISE_IMAGE:
-        return 200, "DUMMY_IMAGE_RECOGNISER", [
-            "APPLE",
-            "BANANA",
-            "PAPAYA"
-        ]
+        return 200, "DUMMY_IMAGE_RECOGNISER", ["APPLE", "BANANA", "PAPAYA"]
 
-    recognisedItemList = []
     payload = {
         "max_tokens": 300,
         "model": "gpt-4-vision-preview",
@@ -178,31 +178,39 @@ def recogniseImageGPT(imgBytes:bytes) -> tuple[int, str, list]:
                                 "Apple",
                                 "Grape",
                                 "Yogurt"
-                            ]"""
+                            ]""",
                     },
                     {
                         "type": "image_url",
                         "image_url": {
                             "url": f"data:image/jpeg;base64,{b64encode(imgBytes).decode()}",
-                           "detail": "low"
-                        }
-                    }
-                ]
+                            "detail": "low",
+                        },
+                    },
+                ],
             }
         ],
     }
+    recognisedItemList, statusCode, statusDesc = send_request(payload)
+    return statusCode, statusDesc, recognisedItemList
+
+
+def send_request(payload):
     try:
         gtpSession = Session()
         gtpSession.headers = GPTElements.headers.value
-        responseJSON = gtpSession.post("https://api.openai.com/v1/chat/completions", json=payload).json()
+        responseJSON = gtpSession.post(
+            "https://api.openai.com/v1/chat/completions", json=payload
+        ).json()
         responseContent = responseJSON["choices"][0]["message"]["content"]
-        statusCode, statusDesc, recognisedItemList = understandGPTResponseImage(responseContent)
+        statusCode, statusDesc, recognisedItemList = understandGPTResponseImage(
+            responseContent
+        )
     except Exception as e:
         statusCode = 422
         statusDesc = "GPT_POST_ERROR"
         logger.fatal("GPTPOST", repr(e))
-    return statusCode, statusDesc, recognisedItemList
-
+    return recognisedItemList, statusCode, statusDesc
 
 
 def saveImage(imgBytes, purchaseUID) -> None:
@@ -214,12 +222,16 @@ def saveImage(imgBytes, purchaseUID) -> None:
     """
     imgObj = Image.open(BytesIO(imgBytes))
     imgObj = imgObj.convert("RGB")
-    imgObj.save(f"{STATIC_FOLDER}{purchaseUID}", optimize=True, quality=50 if COMPRESS_IMAGES else 100, format="JPEG")
+    imgObj.save(
+        f"{STATIC_FOLDER}{purchaseUID}",
+        optimize=True,
+        quality=50 if COMPRESS_IMAGES else 100,
+        format="JPEG",
+    )
     logger.success("IMGSAVE", f"{purchaseUID} saved")
 
 
-
-def baseRecognise(requestObj:Request) -> tuple[int, str, dict]:
+def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
     """
     All image processing starts here. Fetches files from flask request and starts the recognizing process.
     :param requestObj: Flask Request object
@@ -228,7 +240,7 @@ def baseRecognise(requestObj:Request) -> tuple[int, str, dict]:
     itemDict = {}
     imgBytes = b""
     try:
-        imgBytes = requestObj.files.get('IMG_DATA').stream.read()
+        imgBytes = requestObj.files.get("IMG_DATA").stream.read()
         statusCode = 200
         statusDesc = ""
         logger.success("IMAGE_EXTRACT", f"in Files SIZE: {len(imgBytes)}")
@@ -247,13 +259,22 @@ def baseRecognise(requestObj:Request) -> tuple[int, str, dict]:
         if statusCode == 200:
             while True:
                 purchaseUID = randomGenerator().AlphaNumeric(50, 51)
-                if mysqlPool.execute(f"SELECT purchase_uid from purchases where purchase_uid=\"{purchaseUID}\""):
-                    mysqlPool.execute(f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})")
+                if mysqlPool.execute(
+                    f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'
+                ):
+                    mysqlPool.execute(
+                        f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})"
+                    )
                     break
-            Thread(target=saveImage, args=(imgBytes, purchaseUID,)).start()
+            Thread(
+                target=saveImage,
+                args=(
+                    imgBytes,
+                    purchaseUID,
+                ),
+            ).start()
             statusCode, statusDesc, itemDict = attachExpiry(itemList)
     return statusCode, statusDesc, itemDict
-
 
 
 def matchInternalJWT(flaskFunction):
@@ -262,6 +283,7 @@ def matchInternalJWT(flaskFunction):
     :param flaskFunction: the function to switch context to if auth succeeds
     :return:
     """
+
     def __checkJWTCorrectness(request):
         """
         Fetch values from request and match with DB
@@ -272,10 +294,13 @@ def matchInternalJWT(flaskFunction):
         deviceUID = commonMethods.sqlISafe(request.headers.get("DEVICE-UID"))
         userUID = commonMethods.sqlISafe(request.headers.get("USER-UID"))
         internalJWT = commonMethods.sqlISafe(request.headers.get("INTERNAL-JWT"))
-        userUIDTupList = mysqlPool.execute(f"SELECT user_uid from user_info where username=\"{username}\" and internal_jwt=\"{internalJWT}\" and user_uid=\"{userUID}\"")
+        userUIDTupList = mysqlPool.execute(
+            f'SELECT user_uid from user_info where username="{username}" and internal_jwt="{internalJWT}" and user_uid="{userUID}"'
+        )
         if userUIDTupList and userUIDTupList[0]:
             return True, userUID, deviceUID
         return False, "", ""
+
     @wraps(flaskFunction)
     def wrapper():
         """
@@ -289,9 +314,13 @@ def matchInternalJWT(flaskFunction):
             logger.critical("JWT", f"{request.url_rule} incorrect")
             statusCode = 403
             statusDesc = "SERVER_OOS"
-            return CustomResponse().readValues(statusCode, statusDesc, "").createFlaskResponse()
-    return wrapper
+            return (
+                CustomResponse()
+                .readValues(statusCode, statusDesc, "")
+                .createFlaskResponse()
+            )
 
+    return wrapper
 
 
 @recognitionServer.route(f"/{Routes.imgRecv.value}", methods=["POST"])
@@ -306,10 +335,23 @@ def recogniseRoute(userUID, deviceUID):
     request.environ["USER_UID"] = userUID
     request.environ["DEVICE_UID"] = deviceUID
     statusCode, statusDesc, recognisedData = baseRecognise(request)
-    logger.success("SENT", f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}")
-    return CustomResponse().readValues(statusCode, statusDesc, recognisedData).createFlaskResponse()
+    logger.success(
+        "SENT",
+        f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",
+    )
+    return (
+        CustomResponse()
+        .readValues(statusCode, statusDesc, recognisedData)
+        .createFlaskResponse()
+    )
 
 
 connectDB()
-WSGIServer(('127.0.0.1', Constants.coreServerPort.value,), recognitionServer, log=None).serve_forever()
-
+WSGIServer(
+    (
+        "127.0.0.1",
+        Constants.coreServerPort.value,
+    ),
+    recognitionServer,
+    log=None,
+).serve_forever()

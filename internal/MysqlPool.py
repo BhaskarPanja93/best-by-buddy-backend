@@ -19,8 +19,18 @@ Later call the `execute` method with all the necessary parameters
 from time import sleep
 import mysql.connector
 
+
 class mysqlPool:
-    def __init__(self, user, password, dbName, host="127.0.0.1", port=3306, logFile=None, errorWriter=None):
+    def __init__(
+        self,
+        user,
+        password,
+        dbName,
+        host="127.0.0.1",
+        port=3306,
+        logFile=None,
+        errorWriter=None,
+    ):
         self.connections = []
         self.user = user
         self.host = host
@@ -28,8 +38,9 @@ class mysqlPool:
         self.password = password
         self.dbName = dbName
         self.logFile = logFile
-        self.errorWriter = errorWriter if errorWriter is not None else self.defaultErrorWriter
-
+        self.errorWriter = (
+            errorWriter if errorWriter is not None else self.defaultErrorWriter
+        )
 
     def checkDatabaseStructure(self):
         """
@@ -55,8 +66,9 @@ class mysqlPool:
         """
         pass
 
-
-    def defaultErrorWriter(self, category:str="", text:str="", extras:str="", log:bool=True):
+    def defaultErrorWriter(
+        self, category: str = "", text: str = "", extras: str = "", log: bool = True
+    ):
         """
         Demo(default) function to write MySQL errors to output and file
         :param category: Category of the error
@@ -65,12 +77,13 @@ class mysqlPool:
         :param log: Boolean specifying if the error has to be written to the file
         """
         string = f"[MYSQL POOL] [{category}]: {text} {extras}"
-        #print(string)
+        # print(string)
         if log:
             open(self.logFile, "a").write(string + "\n")
 
-
-    def execute(self, syntax: str, ignoreErrors: bool=True, dbRequired: bool=True)->None|list:
+    def execute(
+        self, syntax: str, ignoreErrors: bool = True, dbRequired: bool = True
+    ) -> None | list:
         """
         :param syntax: The MySQL syntax to execute
         :param ignoreErrors: If errors are supposed to be caught promptly or sent to the main application
@@ -80,11 +93,24 @@ class mysqlPool:
         while True:
             try:
                 if not dbRequired:
-                    connection = mysql.connector.connect(user=self.user, host=self.host, port=self.port, password=self.password, autocommit=True)
+                    connection = mysql.connector.connect(
+                        user=self.user,
+                        host=self.host,
+                        port=self.port,
+                        password=self.password,
+                        autocommit=True,
+                    )
                 elif self.connections:
                     connection = self.connections.pop()
                 else:
-                    connection = mysql.connector.connect(user=self.user, host=self.host, port=self.port, password=self.password, database=self.dbName, autocommit=True)
+                    connection = mysql.connector.connect(
+                        user=self.user,
+                        host=self.host,
+                        port=self.port,
+                        password=self.password,
+                        database=self.dbName,
+                        autocommit=True,
+                    )
                 break
             except Exception as e:
                 self.errorWriter("CONNECTION FAIL", repr(e))
@@ -107,5 +133,5 @@ class mysqlPool:
                 raise e
         connection.consume_results()
         self.connections.append(connection)
-        #connection.close()
+        # connection.close()
         return data
