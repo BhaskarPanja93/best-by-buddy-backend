@@ -1,0 +1,39 @@
+HTTP STATUS CODES:
+
+200: "": correct response
+
+403: "IP_PENALTY": IP address has been penalised
+     "LOGIN_REQ": Login Failed or not attempted, try logging in
+     "SERVER_OOS": Server out of sync
+     "USERNAME": Username provided was incorrect
+     "AUTH_NOT_FOUND": Server doesnt have full authentication information for user
+     "INCORRECT_AUTH": Auth provided was incorrect
+     "CORE_REJECTED_AUTH": Client auth was correct but server core didnt allow the user
+     "INCOMPLETE_REGISTRATION": User auth info incomplete
+     "METHOD_INCORRECT": GET, POST, incorrect
+
+422: "GPT_POST_ERROR": Couldn't request GPT
+     "PARSE_FAIL": server process failed (GPT response failed to parse)
+
+500: "IMG_NOT_FOUND": Unable to read a valid image from the request
+     "DUR_UNAVAILABLE": Item duration unavailable
+     "CORE_DOWN": Core Server is not reachable, try again later
+
+
+SERVER CLIENT AUTH:
+to auth using username password:
+    POST req -> /baseauth
+        json has to have "username" "password"
+    response has {"COOKIE":{"DEVICE-COOKIE":""}, "JWT":{"DEVICE-JWT":""}, "DEVICE":{"DEVICE-UID":"}}
+    use these 2 values next time onwards
+    cookie -> DEVICE_COOKIE
+    header -> USERNAME
+    header -> BEARER-JTW
+
+
+
+JWT header key: Bearer-JWT
+username header key: username
+device auth cookie key: DEVICE_COOKIE
+
+
