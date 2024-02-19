@@ -1,12 +1,13 @@
 import os
 from typing import Dict
 
-from gevent import monkey
-
-monkey.patch_all()
+# from gevent import monkey
+#
+# monkey.patch_all()
 
 from threading import Thread
-from gevent.pywsgi import WSGIServer
+
+# from gevent.pywsgi import WSGIServer
 from flask import Flask, request, Request
 from PIL import Image
 from io import BytesIO
@@ -133,9 +134,8 @@ def understandGPTResponseText(
 def parse_expiry_suggestions(responseContent: str) -> Dict[str, datetime]:
     parsed = dict()
     mapping = loads(responseContent)
-    for groceries in mapping:
-        for item, expiry_date in groceries.items():
-            parsed[item] = parse_str_to_datetime(duration_str=expiry_date)
+    for item, expiry_date in mapping.items():
+        parsed[item] = parse_str_to_datetime(duration_str=expiry_date)
 
     return parsed
 
