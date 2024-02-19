@@ -122,30 +122,35 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
                 "content": [
                     {
                         "type": "text",
-                        "text": """
-                        You are given a list of groceries. 
-                        Create a dictionary with recommendations for the expiry dates of all grocery items and output the dictionary as a JSON. 
-                        Do not output anything but the JSON. 
-                    
-                        Example Input JSON:
-                            groceries = [
-                                "Apple",
-                                "Grape",
-                                "Yogurt"
-                            ]
-                            
-                        Example Output JSON:
-                            dict = {
-                                "Apple": Duration,
-                                "Grape": Duration,
-                                "Yogurt": Duration,
-                            }
-                            """,
+                        "text": f""" 
+                        You are given a list of groceries. For each item in the provided list, determine 
+                        a typical expiry period and assign a duration string formatted as follows: 
+                        '<NUMBER> M/W/D', where the duration is expressed in either Month(s) ('M'), Week(s) or Day(s) 
+                        ('D'). Only use one unit of time for each item.
+                        
+                        Based on these durations, create a dictionary mapping each grocery item to its respective 
+                        duration string. Then, serialize this dictionary into a JSON string.
+                        
+                        Ensure the duration for each item is realistic, based on common knowledge about how long 
+                        these items typically last before expiring.
+                        
+                        Input list of groceries (provided as a list of strings):
+                        {itemList}
+                        
+                        Example Output JSON (with hypothetical, not actually correct durations, just to show correct 
+                        use of duration format):
+                        {{ 
+                            "Apple": "1 M", 
+                            "Grape": "7 D", 
+                            "Yogurt": "100 H" 
+                        }} 
+                        """,
                     },
                 ],
             }
         ],
     }
+    send_request(payload=payload)
 
     pass
 
