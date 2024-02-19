@@ -1,4 +1,5 @@
 import os
+from pprint import pprint
 from typing import Dict
 
 from gevent import monkey
@@ -164,7 +165,7 @@ def parse_str_to_datetime(duration_str) -> datetime:
 def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
     payload = {
         "max_tokens": 1000,
-        "model": "gpt-4-1106-preview",
+        "model": "gpt-4-turbo-preview",
         "response_format": {"type": "json_object"},
         "messages": [
             {
@@ -259,7 +260,6 @@ def send_request(payload, is_image):
         responseJSON = gtpSession.post(
             "https://api.openai.com/v1/chat/completions", json=payload
         ).json()
-        print(f"{responseJSON=}")
         responseContent = responseJSON["choices"][0]["message"]["content"]
         if is_image:
             statusCode, statusDesc, response = understandGPTResponseImage(
@@ -271,7 +271,6 @@ def send_request(payload, is_image):
             )
 
     except Exception as e:
-        print(f"{e=}")
         statusCode = 422
         statusDesc = "GPT_POST_ERROR"
         logger.fatal("GPTPOST", repr(e))
@@ -424,8 +423,21 @@ WSGIServer(
 
 
 # if __name__ == "__main__":
-#     print(
+#     pprint(
 #         fetchDurationGPT(
 #             ["Pineapple", "Banana", "Chicken thigh", "Pork ribs", "Fresh lentils"]
 #         )
 #     )
+
+# # Example output:
+# (
+#     200,
+#     "",
+#     {
+#         "Pineapple": datetime(2024, 2, 27, 0, 30, 39, 226634),
+#         "Banana": datetime(2024, 2, 27, 0, 30, 39, 226634),
+#         "Chicken thigh": datetime(2024, 2, 22, 0, 30, 39, 226634),
+#         "Pork ribs": datetime(2024, 2, 23, 0, 30, 39, 226634),
+#         "Fresh lentils": datetime(2024, 3, 20, 0, 30, 39, 226634),
+#     },
+# )
