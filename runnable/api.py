@@ -106,19 +106,41 @@ def understandGPTResponseImage(responseContent:str) -> tuple[int, str, list]:
         return 422, "PARSE_FAIL", []
 
 
+def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
+    payload = {
+        "max_tokens": 1000,
+        "model": "gpt-4-turbo-preview	",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": """
+                        You are given a list of groceries. 
+                        Create a dictionary with recommendations for the expiry dates of all grocery items and output the dictionary as a JSON. 
+                        Do not output anything but the JSON. 
+                    
+                        Example Input JSON:
+                            groceries = [
+                                "Apple",
+                                "Grape",
+                                "Yogurt"
+                            ]
+                            
+                        Example Output JSON:
+                            dict = {
+                                "Apple": Duration,
+                                "Grape": Duration,
+                                "Yogurt": Duration,
+                            }
+                            """,
+                    },
+                ],
+            }
+        ],
+    }
 
-def understandGPTResponseExpiry(responseContent:str):
-    """TODO:
-    Tries all known GPT response types and processes the expiry from GPT response
-    :param responseContent: Response from GPT
-    :return: status code and list of processed items
-    """
-    pass
-
-
-
-def fetchDurationGPT(itemList:list) -> tuple[int, str, dict]:
-    """TODO: Implement this"""
     pass
 
 
