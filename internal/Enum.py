@@ -30,7 +30,7 @@ class Secrets(Enum):
     JWTSecret = "QYHo8hEWLdNbv8EbtdV2MX6836s7qPtumOzCtkM3SeTkR7iVSpJG7sDcslpafZn6BrhrVm"
     userGatewaySecret = "Dg6a52PILi98QK5nxvRnDSoiq3ztX4NJQkoAql6dsLWaCGhlZNdfMCCLAA"
     adminGatewaySecret = "IJkrS7xjTTDSR4FrMbbsiupPTnC4gXGK8PJLNs2nP5H9sY9lkqC6RbBTujs9A75ouXy4gL2XgE5jbkz33v8EeRnH"
-    GPT4APIKey = "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"
+    GPT4APIKey = "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"
     DBHosts = ["127.0.0.1", "10.30.200.1", "bhindi1.ddns.net"]
     DBPassword = "SageHasBestBoobs@69"
 
@@ -63,3 +63,9 @@ class commonMethods:
         if type(parameter) == str:
             return parameter.replace("'", "").replace('"', "")
         return parameter
+
+
+class Tasks(Enum):
+    img_gen = "img_gen"
+    text_gen = "text_gen"
+    img_understanding = "img_understanding"

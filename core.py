@@ -3,7 +3,7 @@ from gevent import monkey
 monkey.patch_all()
 
 from threading import Thread
-from typing import Dict
+from typing import Dict, Any
 from gevent.pywsgi import WSGIServer
 from flask import Flask, request, Request
 from PIL import Image
@@ -15,7 +15,7 @@ from functools import wraps
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, date
 
-from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods
+from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods, Tasks
 from internal.Logger import Logger
 from internal.StringGenerator import randomGenerator
 from internal.CustomResponse import CustomResponse
@@ -230,7 +230,7 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
         ],
     }
     statusCode, statusDesc, itemsWithExpiryDate = send_request(
-        payload=payload, is_image=False
+        payload=payload, task=Tasks.text_gen
     )
 
     return statusCode, statusDesc, itemsWithExpiryDate
@@ -277,11 +277,15 @@ def recogniseImageGPT(imgBytes: bytes) -> tuple[int, str, list]:
             }
         ],
     }
-    statusCode, statusDesc, recognisedItemList = send_request(payload, is_image=True)
+    statusCode, statusDesc, recognisedItemList = send_request(
+        payload, task=Tasks.img_understanding
+    )
     return statusCode, statusDesc, recognisedItemList
 
 
-def send_request(payload, is_image) -> tuple[int, str, list | dict[str, date]]:
+def send_request(
+    payload: Dict[str, Any], task: Tasks
+) -> tuple[int, str, list | dict[str, date]]:
     try:
         gtpSession = Session()
         gtpSession.headers = GPTElements.headers.value
@@ -289,20 +293,20 @@ def send_request(payload, is_image) -> tuple[int, str, list | dict[str, date]]:
             "https://api.openai.com/v1/chat/completions", json=payload
         ).json()
         responseContent = responseJSON["choices"][0]["message"]["content"]
-        if is_image:
-            statusCode, statusDesc, response = understandGPTResponseImage(
-                responseContent
-            )
-        else:  # Text
-            statusCode, statusDesc, response = understandGPTResponseText(
-                responseContent
-            )
-
+        match task:
+            case Tasks.img_understanding:
+                statusCode, statusDesc, response = understandGPTResponseImage(
+                    responseContent
+                )
+            case Tasks.text_gen:
+                statusCode, statusDesc, response = understandGPTResponseText(
+                    responseContent
+                )
     except Exception as e:
         statusCode = 422
         statusDesc = "GPT_POST_ERROR"
         logger.fatal("GPTPOST", repr(e))
-        response = [] if is_image else {}
+        response = [] if task == Tasks.img_understanding else {}
     return statusCode, statusDesc, response
 
 
