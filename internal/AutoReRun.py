@@ -40,7 +40,7 @@ class AutoReRun(Thread):
     ):
         Thread.__init__(self)
         self.programsToRun = toRun
-        self.programsToCheck = toCheck
+        self.programsToCheck = toCheck.__add__(list(toRun))
         self.currentProcesses = []
         self.reCheckInterval = reCheckInterval
         self.lastFileStat = self.fetchFileStats()

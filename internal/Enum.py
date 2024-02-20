@@ -1,18 +1,21 @@
 from enum import Enum
 from pathlib import Path
-
+folderLocation = "D:\\testing\\best-by-buddy\\"
 
 class RequiredFiles(Enum):
-    folderLocation = r"C:\FILES\AllProjects\Python\best-by-buddy"
     common = [
-        Path(folderLocation, r"\internal\AutoReRun.py"),
-        Path(folderLocation, r"\internal\CustomResponse.py"),
-        Path(folderLocation, r"\internal\Enum.py"),
-        Path(folderLocation, r"\internal\Logger.py"),
-        Path(folderLocation, r"\internal\MysqlPool.py"),
-        Path(folderLocation, r"\internal\StringGenerator.py"),
-        Path(folderLocation, r"\internal\MysqlPool.py"),
+        Path(folderLocation, r"internal\AutoReRun.py"),
+        Path(folderLocation, r"internal\CustomResponse.py"),
+        Path(folderLocation, r"internal\Enum.py"),
+        Path(folderLocation, r"internal\Logger.py"),
+        Path(folderLocation, r"internal\MysqlPool.py"),
+        Path(folderLocation, r"internal\StringGenerator.py"),
+        Path(folderLocation, r"internal\MysqlPool.py"),
     ]
+    coreFile = Path(folderLocation, r"core.py")
+    userGatewayFile = Path(folderLocation, r"user_gateway.py")
+    adminGatewayFile = Path(folderLocation, r"admin_gateway.py")
+
 
 
 class Constants(Enum):

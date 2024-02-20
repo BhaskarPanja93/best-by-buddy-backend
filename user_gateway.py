@@ -1,7 +1,10 @@
+
+
 from gevent import monkey
 
 monkey.patch_all()
 
+from base64 import b64decode
 from gevent.pywsgi import WSGIServer
 from flask import Flask, request, Request
 from requests import post
@@ -9,7 +12,7 @@ from functools import wraps
 from bcrypt import checkpw, gensalt, hashpw
 from flask_jwt_extended import create_access_token, JWTManager
 from cryptography.fernet import Fernet
-from json import dumps
+from json import dumps, loads
 from datetime import timedelta
 from threading import Thread
 from time import sleep
@@ -42,7 +45,7 @@ mysqlPool: MySQLPool | None = None
 
 def connectDB():
     global DBReady, mysqlPool
-    for host in ["bhindi1.ddns.net"]:
+    for host in ["127.0.0.1", "bhindi1.ddns.net"]:
         try:
             mysqlPool = MySQLPool(
                 user="root",
@@ -184,12 +187,13 @@ def waitForInitDB(flaskFunction):
 
 
 def registerNewUser(requestObj: Request) -> tuple[int, str, dict]:
+    print(requestObj.form)
     username = commonMethods.sqlISafe(requestObj.form.get("username"))
     passwordEncoded = requestObj.form.get("password").encode()
     name = requestObj.form.get("name").encode()
     authData = {}
-    passHash = hashpw(passwordEncoded, gensalt(prefix=b"salted"))
-    cookieDict = {"ADDRESS": requestObj.remote_addr, "UA": requestObj.user_agent}
+    passHash = hashpw(passwordEncoded, gensalt())
+    cookieDict = {"ADDRESS": requestObj.remote_addr, "UA": requestObj.user_agent.string}
     cookieStr = fernetObj.encrypt(dumps(cookieDict).encode()).decode()
     address = request.remote_addr
     while True:
@@ -234,12 +238,13 @@ def registerNewUser(requestObj: Request) -> tuple[int, str, dict]:
             f'SELECT device_uid from admin_device_auth where device_uid="{deviceUID}"'
         ):
             mysqlPool.execute(
-                f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{cookieStr}", "{externalJWT}", {requestObj.user_agent}, "{address}")'
+                f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{cookieStr}", "{externalJWT}", {requestObj.user_agent.string}, "{address}")'
             )
             break
     authData["COOKIE"] = {"DEVICE-COOKIE": cookieStr}
     authData["JWT"] = {"DEVICE-JWT": externalJWT}
     authData["DEVICE"] = {"DEVICE-UID": deviceUID}
+    logger.skip("REGNEW", str(authData))
     return 200, "", authData
 
 
@@ -270,7 +275,7 @@ def baseAuthRaw(requestObj: Request) -> tuple[int, str, dict]:
                 statusDesc = ""
                 cookieDict = {
                     "ADDRESS": requestObj.remote_addr,
-                    "UA": requestObj.user_agent,
+                    "UA": requestObj.user_agent.string,
                 }
                 externalJWT = create_access_token(
                     identity=username, expires_delta=timedelta(days=365)
@@ -284,7 +289,7 @@ def baseAuthRaw(requestObj: Request) -> tuple[int, str, dict]:
                         f'SELECT device_uid from admin_device_auth where device_uid="{deviceUID}"'
                     ):
                         mysqlPool.execute(
-                            f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{cookieStr}", "{externalJWT}", {requestObj.user_agent}, "{address}")'
+                            f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{cookieStr}", "{externalJWT}", {requestObj.user_agent.string}, "{address}")'
                         )
                         break
                 authData["COOKIE"] = {"DEVICE-COOKIE": cookieStr}
@@ -342,6 +347,7 @@ def authenticateApp():
 @onlyAllowedMethods
 @onlyAllowedIPs
 def registerRaw():
+    logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
     statusCode, statusDesc, authData = registerNewUser(request)
     logger.success("SENT", f"{request.url_rule} response sent to {request.remote_addr}")
     return (
@@ -355,6 +361,7 @@ def registerRaw():
 @onlyAllowedMethods
 @onlyAllowedIPs
 def authenticateRaw():
+    logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
     statusCode, statusDesc, authData = baseAuthRaw(request)
     logger.success("SENT", f"{request.url_rule} response sent to {request.remote_addr}")
     return (
@@ -369,32 +376,44 @@ def authenticateRaw():
 @onlyAllowedIPs
 @onlyAllowedAuth
 def recogniseRoute(username, userUID, deviceUID):
+    logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
     statusCode, statusDesc, internalJWT = getInternalJWT(request)
-    header = {
-        "INTERNAL-JWT": internalJWT,
-        "USERNAME": username,
-        "USER-UID": userUID,
-        "DEVICE-UID": deviceUID,
-    }
+    imgBytes = b""
+    data = ""
     try:
-        response = (
-            CustomResponse()
-            .readDict(
-                post(
-                    f"http://127.0.0.1:{Constants.coreServerPort.value}/{Routes.imgRecv.value}",
-                    headers=header,
-                ).json()
-            )
-            .createFlaskResponse()
-        )
-        logger.success("CORE_FWD", f"{request.url_rule} sent to {request.remote_addr}")
-    except Exception as e:
-        print(repr(e))
-        response = (
-            CustomResponse().readValues(500, "CORE_DOWN", "").createFlaskResponse()
-        )
-        logger.fatal("CORE_FWD", f"Unable to connect")
-    return response
+        imgBytes = request.files.get("IMG_DATA").stream.read()
+        statusCode = 200
+        statusDesc = ""
+        logger.success("IMAGE_EXTRACT", f"in Files SIZE: {len(imgBytes)}")
+    except:
+        try:
+            imgBytes = b64decode(loads(request.data)["IMG_DATA"])
+            statusCode = 200
+            statusDesc = ""
+            logger.success("IMAGE_EXTRACT", f"in Data Size: {len(imgBytes)}")
+        except:
+            statusCode = 500
+            statusDesc = "IMG_NOT_FOUND"
+            logger.fatal("IMAGE_EXTRACT", f"failed")
+    if statusCode == 200:
+        header = {
+            "INTERNAL-JWT": internalJWT,
+            "USERNAME": username,
+            "USER-UID": userUID,
+            "DEVICE-UID": deviceUID,
+        }
+        try:
+            data = post(
+                        f"http://127.0.0.1:{Constants.coreServerPort.value}/{Routes.imgRecv.value}",
+                        headers=header, data=imgBytes
+                    ).json()
+            logger.success("CORE_FWD", f"{request.url_rule} sent to {request.remote_addr}")
+        except Exception as e:
+            print(repr(e))
+            statusCode = 500
+            statusDesc = "CORE_DOWN"
+            logger.fatal("CORE_FWD", f"Unable to connect")
+    return CustomResponse().readValues(statusCode, statusDesc, data).createFlaskResponse()
 
 
 @userGateway.before_request
@@ -415,7 +434,7 @@ def userBeforeRequest():
     # print(request.headers.get("JWT"))
     # print(request.environ)
 
-
+print(f"USER GATEWAY: {Constants.userGatewayPort.value}")
 Thread(target=connectDB).start()
 WSGIServer(
     (

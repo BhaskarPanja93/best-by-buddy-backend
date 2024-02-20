@@ -1,7 +1,4 @@
 from internal.AutoReRun import AutoReRun
+from internal.Enum import RequiredFiles
 
-toRun = {r"C:\FILES\AllProjects\Python\best-by-buddy\runnable\api.py": []}
-toCheck = [r""]
-
-
-AutoReRun().start()
+AutoReRun(toRun = {RequiredFiles.coreFile.value: []}, toCheck = [RequiredFiles.common.value]).start()

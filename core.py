@@ -1,18 +1,14 @@
-import os
-from pprint import pprint
-from typing import Dict
-
 from gevent import monkey
 
 monkey.patch_all()
 
 from threading import Thread
-
+from typing import Dict
 from gevent.pywsgi import WSGIServer
 from flask import Flask, request, Request
 from PIL import Image
 from io import BytesIO
-from base64 import b64encode, b64decode
+from base64 import b64encode
 from requests import Session
 from json import loads
 from functools import wraps
@@ -26,6 +22,7 @@ from internal.CustomResponse import CustomResponse
 from internal.MysqlPool import mysqlPool as MySQLPool
 
 STATIC_FOLDER = "savedimages/"
+LOGIN_REQUIRED = False
 COMPRESS_IMAGES = False
 RECOGNISE_IMAGE = False
 RECOGNISE_DATES = False
@@ -44,7 +41,7 @@ def connectDB() -> None:
     :return: None
     """
     global mysqlPool
-    for host in [os.getenv("DNS_SERVER")]:
+    for host in ["127.0.0.1"]:
         try:
             mysqlPool = MySQLPool(
                 user="root",
@@ -166,6 +163,9 @@ def parse_str_to_datetime(duration_str) -> datetime:
 
 
 def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
+    if not RECOGNISE_IMAGE:
+        return 200, "DUMMY_EXPIRY_DATES", {'Banana': date(2024, 2, 27),'Chicken thigh': date(2024, 2, 27)}
+
     payload = {
         "max_tokens": 1000,
         "model": "gpt-4-turbo-preview",
@@ -306,42 +306,26 @@ def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
     :return: statusCode and the final processed json/dict
     """
     itemDict = {}
-    imgBytes = b""
-    try:
-        imgBytes = requestObj.files.get("IMG_DATA").stream.read()
-        statusCode = 200
-        statusDesc = ""
-        logger.success("IMAGE_EXTRACT", f"in Files SIZE: {len(imgBytes)}")
-    except:
-        try:
-            imgBytes = b64decode(loads(requestObj.data)["IMG_DATA"])
-            statusCode = 200
-            statusDesc = ""
-            logger.success("IMAGE_EXTRACT", f"in Data Size: {len(imgBytes)}")
-        except:
-            statusCode = 500
-            statusDesc = "IMG_NOT_FOUND"
-            logger.fatal("IMAGE_EXTRACT", f"failed")
+    imgBytes = requestObj.data
+    statusCode, statusDesc, itemList = recogniseImageGPT(imgBytes)
     if statusCode == 200:
-        statusCode, statusDesc, itemList = recogniseImageGPT(imgBytes)
-        if statusCode == 200:
-            while True:
-                purchaseUID = randomGenerator().AlphaNumeric(50, 51)
-                if mysqlPool.execute(
-                    f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'
-                ):
-                    mysqlPool.execute(
-                        f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})"
-                    )
-                    break
-            Thread(
-                target=saveImage,
-                args=(
-                    imgBytes,
-                    purchaseUID,
-                ),
-            ).start()
-            statusCode, statusDesc, itemDict = attachExpiry(itemList)
+        while True:
+            purchaseUID = randomGenerator().AlphaNumeric(50, 51)
+            if mysqlPool.execute(
+                f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'
+            ):
+                mysqlPool.execute(
+                    f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})"
+                )
+                break
+        Thread(
+            target=saveImage,
+            args=(
+                imgBytes,
+                purchaseUID,
+            ),
+        ).start()
+        statusCode, statusDesc, itemDict = attachExpiry(itemList)
     return statusCode, statusDesc, itemDict
 
 
@@ -375,18 +359,23 @@ def matchInternalJWT(flaskFunction):
         Function to decide if all requests are allowed or only recognised ones, else return a 403
         :return: Flask response object
         """
-        jwtCorrect, userUID, deviceUID = __checkJWTCorrectness(request)
-        if jwtCorrect:
-            return flaskFunction(userUID, deviceUID)
+        if LOGIN_REQUIRED:
+            jwtCorrect, userUID, deviceUID = __checkJWTCorrectness(request)
+            if not jwtCorrect:
+                logger.critical("JWT", f"{request.url_rule} incorrect")
+                statusCode = 403
+                statusDesc = "SERVER_OOS"
+                return (
+                    CustomResponse()
+                    .readValues(statusCode, statusDesc, "")
+                    .createFlaskResponse()
+                )
         else:
-            logger.critical("JWT", f"{request.url_rule} incorrect")
-            statusCode = 403
-            statusDesc = "SERVER_OOS"
-            return (
-                CustomResponse()
-                .readValues(statusCode, statusDesc, "")
-                .createFlaskResponse()
-            )
+            userUID, deviceUID = "", ""
+
+
+        return flaskFunction(userUID, deviceUID)
+
 
     return wrapper
 
@@ -413,7 +402,7 @@ def recogniseRoute(userUID, deviceUID):
         .createFlaskResponse()
     )
 
-
+print(f"CORE: {Constants.coreServerPort.value}")
 connectDB()
 WSGIServer(
     (

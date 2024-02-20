@@ -1,4 +1,5 @@
 from colr import color
+from time import ctime
 
 from internal.Enum import Constants
 
@@ -15,7 +16,7 @@ class Logger:
         self._skip = [1, (0, 255, 195), (0, 100, 77)]
 
     def __log(self, string: str, back: tuple, fore: tuple):
-        self.logs.append(string)
+        self.logs.append(f"[{ctime()}] {string}")
         if len(self.logs) > Constants.logCount.value:
             self.logs.pop()
         print(color(string, back=back, fore=fore))
