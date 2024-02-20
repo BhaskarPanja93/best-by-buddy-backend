@@ -252,11 +252,11 @@ def recogniseImageGPT(imgBytes: bytes) -> tuple[int, str, list]:
             }
         ],
     }
-    recognisedItemList, statusCode, statusDesc = send_request(payload, is_image=True)
+    statusCode, statusDesc, recognisedItemList = send_request(payload, is_image=True)
     return statusCode, statusDesc, recognisedItemList
 
 
-def send_request(payload, is_image):
+def send_request(payload, is_image) -> tuple[int, str, list | dict[str, date]]:
     try:
         gtpSession = Session()
         gtpSession.headers = GPTElements.headers.value
