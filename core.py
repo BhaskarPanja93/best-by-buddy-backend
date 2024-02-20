@@ -14,6 +14,10 @@ from json import loads
 from functools import wraps
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, date
+from dotenv import load_dotenv
+from openai import OpenAI
+import uuid
+from pathlib import Path
 
 from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods, Tasks
 from internal.Logger import Logger
@@ -21,10 +25,16 @@ from internal.StringGenerator import randomGenerator
 from internal.CustomResponse import CustomResponse
 from internal.MysqlPool import mysqlPool as MySQLPool
 
+load_dotenv()
+
+
+client = OpenAI()
+
 STATIC_FOLDER = "savedimages/"
 LOGIN_REQUIRED = False
 COMPRESS_IMAGES = False
 RECOGNISE_IMAGE = False
+USE_DUMMY_IMAGE = False
 RECOGNISE_DATES = False
 ATTACH_IMAGES = False
 DELETE_IMAGE_FILES = False
@@ -189,7 +199,17 @@ def parse_str_to_datetime(duration_str) -> datetime:
 
 def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
     if not RECOGNISE_IMAGE:
-        return 200, "DUMMY_EXPIRY_DATES", {"APPLE": {"IMG":"http://someimage.jpg", "EXPIRES": date(2024, 2, 27)}, "BANANA": {"IMG":"http://someimage2.jpg", "EXPIRES": date(2024, 2, 29)}}
+        return (
+            200,
+            "DUMMY_EXPIRY_DATES",
+            {
+                "APPLE": {"IMG": "http://someimage.jpg", "EXPIRES": date(2024, 2, 27)},
+                "BANANA": {
+                    "IMG": "http://someimage2.jpg",
+                    "EXPIRES": date(2024, 2, 29),
+                },
+            },
+        )
 
     payload = {
         "max_tokens": 1000,
@@ -310,6 +330,50 @@ def send_request(
     return statusCode, statusDesc, response
 
 
+def generate_icon(item_name: str) -> tuple[int, str, Any]:
+    if USE_DUMMY_IMAGE:
+        return 200, "DUMMY_IMAGE", Path(STATIC_FOLDER, "apple.jpg")
+
+    response = client.images.generate(
+        model="dall-e-3",
+        prompt=f"Generate an icon for '{item_name}'",
+        size="1024x1024",
+        quality="standard",
+        n=1,
+    )
+
+    image_url = response.data[0].url
+
+    statusCode, statusDesc, icon_uid = download_image()
+
+    return statusCode, statusDesc, icon_uid
+
+
+def download_image():
+    pass
+
+
+def generate_item_uid(item_name):
+    """
+    Generates a unique identifier for an item by combining a UUID with the item's name.
+
+    Parameters:
+    - item_name: The name of the item (e.g., "Apple", "Banana").
+
+    Returns:
+    A tuple containing the unique identifier (item_uid) and the path to the item's icon.
+    """
+    # Generate a unique UUID
+    unique_id = str(uuid.uuid4())
+    # Create the item_uid by combining the UUID with the item name
+    item_uid = f"{unique_id}-{item_name}"
+
+    # Assuming a simple function to get the path to an item's icon based on its name
+    icon_path = get_icon_path(item_name)
+
+    return item_uid, icon_path
+
+
 def saveImage(imgBytes, purchaseUID) -> None:
     """
     Save the image for future reference
@@ -329,7 +393,6 @@ def saveImage(imgBytes, purchaseUID) -> None:
         logger.success("IMGSAVE", f"{purchaseUID} saved")
     else:
         logger.info("IMGSAVE", f"Dummy image")
-
 
 
 def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
