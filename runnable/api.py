@@ -429,7 +429,7 @@ WSGIServer(
 #         )
 #     )
 
-# # Example output:
+# # Example output from fetchDurationGPT:
 # (
 #     200,
 #     "",
