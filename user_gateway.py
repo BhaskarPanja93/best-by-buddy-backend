@@ -112,9 +112,11 @@ def onlyAllowedIPs(flaskFunction):
 
 def onlyAllowedAuth(flaskFunction):
     def __checkAuthCorrectness(request):
+        print("")
         username = commonMethods.sqlISafe(request.headers.get("USERNAME"))
         externalJWT = commonMethods.sqlISafe(request.headers.get("BEARER-JWT"))
         cookie = commonMethods.sqlISafe(request.cookies.get("DEVICE-COOKIE"))
+        print(username, externalJWT, cookie, sep="\n\n")
         userUIDTupList = mysqlPool.execute(
             f'SELECT user_uid from user_info where username="{username}"'
         )
@@ -130,7 +132,6 @@ def onlyAllowedAuth(flaskFunction):
                     deviceUID = addressDeviceUIDTup[1]
                     return True, username, userUID, deviceUID
         return False, "", "", ""
-
     @wraps(flaskFunction)
     def wrapper():
         authCorrect, username, userUID, deviceID = __checkAuthCorrectness(request)
@@ -145,7 +146,6 @@ def onlyAllowedAuth(flaskFunction):
                 .readValues(statusCode, statusDesc, "")
                 .createFlaskResponse()
             )
-
     return wrapper
 
 
@@ -413,7 +413,7 @@ def recogniseRoute(username, userUID, deviceUID):
             statusCode = 500
             statusDesc = "CORE_DOWN"
             logger.fatal("CORE_FWD", f"Unable to connect")
-    return CustomResponse().readValues(statusCode, statusDesc, data).createFlaskResponse()
+    return CustomResponse().readValues(statusCode, statusDesc, data.get("DATA")).createFlaskResponse()
 
 
 @userGateway.before_request
