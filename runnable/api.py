@@ -17,7 +17,7 @@ from requests import Session
 from json import loads
 from functools import wraps
 from dateutil.relativedelta import relativedelta
-from datetime import datetime
+from datetime import datetime, date
 
 from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods
 from internal.Logger import Logger
@@ -122,7 +122,7 @@ def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
 
 def understandGPTResponseText(
     responseContent: str,
-) -> tuple[int, str, Dict[str, datetime]]:
+) -> tuple[int, str, Dict[str, date]]:
     """
     Tries all known GPT response types and processes the final expiry date recommendations recognized from the given
     JSON from GPT response
@@ -135,11 +135,11 @@ def understandGPTResponseText(
         return 422, "PARSE_FAIL", {}
 
 
-def parse_expiry_suggestions(responseContent: str) -> Dict[str, datetime]:
+def parse_expiry_suggestions(responseContent: str) -> Dict[str, date]:
     parsed = dict()
     mapping = loads(responseContent)
     for item, expiry_date in mapping.items():
-        parsed[item] = parse_str_to_datetime(duration_str=expiry_date)
+        parsed[item] = parse_str_to_datetime(duration_str=expiry_date).date()
 
     return parsed
 
