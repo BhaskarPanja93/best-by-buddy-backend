@@ -1,18 +1,15 @@
-
-
 from gevent import monkey
-
 monkey.patch_all()
 
+from werkzeug.security import generate_password_hash, check_password_hash
 from base64 import b64decode
 from gevent.pywsgi import WSGIServer
 from flask import Flask, request, Request
 from requests import post
 from functools import wraps
-from bcrypt import checkpw, gensalt, hashpw
 from flask_jwt_extended import create_access_token, JWTManager
 from cryptography.fernet import Fernet
-from json import dumps, loads
+from json import loads
 from datetime import timedelta
 from threading import Thread
 from time import sleep
@@ -24,23 +21,22 @@ from internal.StringGenerator import randomGenerator
 from internal.MysqlPool import mysqlPool as MySQLPool
 
 ### switches
-ALLOW_ANY_REQ_TYPE = True
+ALLOW_ANY_REQ_METHOD = True
 LOGIN_REQUIRED = False
-ALLOW_ALL_IPS = True
+UNBLOCK_ALL_IP = True
 ALLOW_LOCALHOST = False
 FETCH_IMAGE = False
 
 ### internal checker
 DBReady = False
 
-fernetObj = Fernet(Secrets.fernetSecret.value)
 logger = Logger()
+fernetObj = Fernet(Secrets.fernetSecret.value)
 stringGen = randomGenerator()
 userGateway = Flask("RECOGNITION_API")
 userGateway.config["JWT_SECRET_KEY"] = Secrets.JWTSecret.value
 userGateway.config["SECRET_KEY"] = Secrets.userGatewaySecret.value
 jwt = JWTManager(userGateway)
-activeUsers = {}
 mysqlPool: MySQLPool | None = None
 
 
@@ -69,14 +65,9 @@ def connectDB():
 def penaliseIP(requestObj: Request):
     address = commonMethods.sqlISafe(requestObj.remote_addr)
     try:
-        mysqlPool.execute(
-            f'INSERT INTO ip_penalties values("{address}", DATE_ADD(now(), INTERVAL 1 HOUR))',
-            ignoreErrors=False,
-        )
+        mysqlPool.execute(f'INSERT INTO ip_penalties values("{address}", DATE_ADD(now(), INTERVAL 1 HOUR))', ignoreErrors=False)
     except:
-        mysqlPool.execute(
-            f'UPDATE ip_penalties set expires=DATE_ADD(expires, INTERVAL 1 HOUR) where address="{address}"'
-        )
+        mysqlPool.execute(f'UPDATE ip_penalties set expires=DATE_ADD(expires, INTERVAL 1 HOUR) where address="{address}"')
 
 
 def onlyAllowedIPs(flaskFunction):
@@ -90,10 +81,9 @@ def onlyAllowedIPs(flaskFunction):
         ):
             return True
         return False
-
     @wraps(flaskFunction)
     def wrapper():
-        if ALLOW_ALL_IPS or not __isIPPenalised(request):
+        if UNBLOCK_ALL_IP or not __isIPPenalised(request):
             return flaskFunction()
         else:
             logger.critical(
@@ -114,14 +104,13 @@ def onlyAllowedAuth(flaskFunction):
     def __checkAuthCorrectness(request):
         username = commonMethods.sqlISafe(request.headers.get("USERNAME"))
         externalJWT = commonMethods.sqlISafe(request.headers.get("BEARER-JWT"))
-        cookie = commonMethods.sqlISafe(request.cookies.get("DEVICE-COOKIE"))
         userUIDTupList = mysqlPool.execute(
             f'SELECT user_uid from user_info where username="{username}"'
         )
         if userUIDTupList and userUIDTupList[0]:
             userUID = userUIDTupList[0][0].decode()
             addressDeviceUIDTupList = mysqlPool.execute(
-                f'SELECT address, device_uid from user_device_auth where user_uid="{userUID}" and cookie="{cookie}" and external_jwt="{externalJWT}"'
+                f'SELECT address, device_uid from user_device_auth where user_uid="{userUID}" and external_jwt="{externalJWT}"'
             )
             for addressDeviceUIDTup in addressDeviceUIDTupList:
                 if commonMethods.checkRelatedIP(
@@ -137,7 +126,7 @@ def onlyAllowedAuth(flaskFunction):
         if not LOGIN_REQUIRED or authCorrect:
             return flaskFunction(username, userUID, deviceID)
         else:
-            logger.critical("COOKIE", f"{request.url_rule} from {request.remote_addr}")
+            logger.critical("AUTH", f"{request.url_rule} from {request.remote_addr}")
             statusCode = 403
             statusDesc = "LOGIN_REQ"
             return (
@@ -145,7 +134,6 @@ def onlyAllowedAuth(flaskFunction):
                 .readValues(statusCode, statusDesc, "")
                 .createFlaskResponse()
             )
-
     return wrapper
 
 
@@ -157,7 +145,7 @@ def onlyAllowedMethods(flaskFunction):
 
     @wraps(flaskFunction)
     def wrapper():
-        if ALLOW_ANY_REQ_TYPE or __checkMethodCorrectness(request):
+        if ALLOW_ANY_REQ_METHOD or __checkMethodCorrectness(request):
             return flaskFunction()
         else:
             logger.critical("METHOD", f"{request.method} from {request.remote_addr}")
@@ -190,59 +178,42 @@ def waitForInitDB(flaskFunction):
 def registerNewUser(requestObj: Request) -> tuple[int, str, dict]:
     print(requestObj.form)
     username = commonMethods.sqlISafe(requestObj.form.get("username"))
-    passwordEncoded = requestObj.form.get("password").encode()
+    password = requestObj.form.get("password")
     name = requestObj.form.get("name").encode()
     authData = {}
-    passHash = hashpw(passwordEncoded, gensalt())
-    cookieDict = {"ADDRESS": requestObj.remote_addr, "UA": requestObj.user_agent.string}
-    cookieStr = fernetObj.encrypt(dumps(cookieDict).encode()).decode()
+    passHash = generate_password_hash(password, "scrypt", 50)
     address = request.remote_addr
     while True:
-        externalJWT = create_access_token(
-            identity=username, expires_delta=timedelta(days=365)
-        )
-        if not mysqlPool.execute(
-            f'SELECT external_jwt from user_device_auth where external_jwt="{externalJWT}"'
-        ) and not mysqlPool.execute(
-            f'SELECT external_jwt from admin_device_auth where external_jwt="{externalJWT}"'
-        ):
+        externalJWT = create_access_token(identity=username, expires_delta=timedelta(days=365))
+        print(f"{externalJWT=}")
+        if (not mysqlPool.execute(f'SELECT external_jwt from user_device_auth where external_jwt="{externalJWT}"')
+                and not mysqlPool.execute(f'SELECT external_jwt from admin_device_auth where external_jwt="{externalJWT}"')):
+            print(f"{len(externalJWT)=}")
             break
     while True:
-        internalJWT = create_access_token(
-            identity=username, expires_delta=timedelta(days=3650)
-        )
-        if not mysqlPool.execute(
-            f'SELECT internal_jwt from user_connection_auth where internal_jwt="{internalJWT}"'
-        ) and not mysqlPool.execute(
-            f'SELECT internal_jwt from admin_connection_auth where internal_jwt="{internalJWT}"'
-        ):
+        internalJWT = create_access_token(identity=username, expires_delta=timedelta(days=3650))
+        print(f"{internalJWT[:10]=}")
+        if (not mysqlPool.execute(f'SELECT internal_jwt from user_connection_auth where internal_jwt="{internalJWT}"')
+                and not mysqlPool.execute(f'SELECT internal_jwt from admin_connection_auth where internal_jwt="{internalJWT}"')):
+            print(f"{len(internalJWT)=}")
             break
     while True:
         userUID = randomGenerator().AlphaNumeric(50, 51)
-        if not mysqlPool.execute(
-            f'SELECT user_uid from user_connection_auth where user_uid="{userUID}"'
-        ) and not mysqlPool.execute(
-            f'SELECT admin_uid from admin_connection_auth where admin_uid="{userUID}"'
-        ):
-            mysqlPool.execute(
-                f'INSERT INTO user_info values ("{userUID}", "{username}", now(), "{name}")'
-            )
-            mysqlPool.execute(
-                f'INSERT INTO user_connection_auth values ("{userUID}", "{internalJWT}", "{passHash}")'
-            )
+        print(f"{userUID=}")
+        if (not mysqlPool.execute(f'SELECT user_uid from user_connection_auth where user_uid="{userUID}"')
+                and not mysqlPool.execute(f'SELECT admin_uid from admin_connection_auth where admin_uid="{userUID}"')):
+            mysqlPool.execute(f'INSERT INTO user_info values ("{userUID}", "{username}", now(), "{name}")')
+            mysqlPool.execute(f'INSERT INTO user_connection_auth values ("{userUID}", "{internalJWT}", "{passHash}")')
+            print(f"{len(userUID)=}")
             break
     while True:
         deviceUID = randomGenerator().AlphaNumeric(50, 51)
-        if not mysqlPool.execute(
-            f'SELECT device_uid from user_device_auth where device_uid="{deviceUID}"'
-        ) and not mysqlPool.execute(
-            f'SELECT device_uid from admin_device_auth where device_uid="{deviceUID}"'
-        ):
-            mysqlPool.execute(
-                f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{cookieStr}", "{externalJWT}", {requestObj.user_agent.string}, "{address}")'
-            )
+        print(f"{deviceUID=}")
+        if (not mysqlPool.execute(f'SELECT device_uid from user_device_auth where device_uid="{deviceUID}"')
+                and not mysqlPool.execute(f'SELECT device_uid from admin_device_auth where device_uid="{deviceUID}"')):
+            mysqlPool.execute(f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{externalJWT}", {str(requestObj.user_agent)}, "{address}")')
+            print(f"{len(deviceUID)=}")
             break
-    authData["COOKIE"] = {"DEVICE-COOKIE": cookieStr}
     authData["JWT"] = {"DEVICE-JWT": externalJWT}
     authData["DEVICE"] = {"DEVICE-UID": deviceUID}
     logger.skip("REGNEW", str(authData))
@@ -252,48 +223,30 @@ def registerNewUser(requestObj: Request) -> tuple[int, str, dict]:
 def baseAuthRaw(requestObj: Request) -> tuple[int, str, dict]:
     address = commonMethods.sqlISafe(requestObj.remote_addr)
     username = commonMethods.sqlISafe(requestObj.form.get("username"))
-    passwordEncoded = requestObj.form.get("password").encode()
-    userUIDTupList = mysqlPool.execute(
-        f'SELECT user_uid from user_info where username="{username}"'
-    )
+    password = requestObj.form.get("password")
+    userUIDTupList = mysqlPool.execute(f'SELECT user_uid from user_info where username="{username}"')
     authData = {}
     statusCode = 403
     if not userUIDTupList or not userUIDTupList[0]:
         statusDesc = "INCORRECT_USERNAME"
     else:
         userUID = userUIDTupList[0][0].decode()
-        passHashTupList = mysqlPool.execute(
-            f'SELECT pass_hash from user_connection_auth where user_uid="{userUID}"'
-        )
+        passHashTupList = mysqlPool.execute(f'SELECT pass_hash from user_connection_auth where user_uid="{userUID}"')
         if not passHashTupList or not passHashTupList[0]:
             statusDesc = "INCOMPLETE_REGISTRATION"
         else:
             passHash = passHashTupList[0][0].decode()
-            if passHash != checkpw(passwordEncoded, passHash):
+            if not check_password_hash(passHash, password):
                 statusDesc = "INCORRECT_AUTH"
             else:
                 statusCode = 200
                 statusDesc = ""
-                cookieDict = {
-                    "ADDRESS": requestObj.remote_addr,
-                    "UA": requestObj.user_agent.string,
-                }
-                externalJWT = create_access_token(
-                    identity=username, expires_delta=timedelta(days=365)
-                )
-                cookieStr = fernetObj.encrypt(dumps(cookieDict).encode()).decode()
+                externalJWT = create_access_token(identity=username, expires_delta=timedelta(days=365))
                 while True:
                     deviceUID = randomGenerator().AlphaNumeric(50, 51)
-                    if not mysqlPool.execute(
-                        f'SELECT device_uid from user_device_auth where device_uid="{deviceUID}"'
-                    ) and not mysqlPool.execute(
-                        f'SELECT device_uid from admin_device_auth where device_uid="{deviceUID}"'
-                    ):
-                        mysqlPool.execute(
-                            f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{cookieStr}", "{externalJWT}", {requestObj.user_agent.string}, "{address}")'
-                        )
+                    if not mysqlPool.execute(f'SELECT device_uid from user_device_auth where device_uid="{deviceUID}"') and not mysqlPool.execute(f'SELECT device_uid from admin_device_auth where device_uid="{deviceUID}"'):
+                        mysqlPool.execute(f'INSERT INTO user_device_auth values ("{deviceUID}", "{userUID}", "{externalJWT}", {str(requestObj.user_agent)}, "{address}")')
                         break
-                authData["COOKIE"] = {"DEVICE-COOKIE": cookieStr}
                 authData["JWT"] = {"DEVICE-JWT": externalJWT}
                 authData["DEVICE"] = {"DEVICE-UID": deviceUID}
     return statusCode, statusDesc, authData
@@ -306,22 +259,19 @@ def getInternalJWT(requestObj: Request) -> tuple[int, str, str]:
     if not LOGIN_REQUIRED:
         statusCode = 200
         statusDesc = ""
-        username, externalJWT, cookie = "", "", ""
     else:
         username = commonMethods.sqlISafe(requestObj.headers.get("username"))
         externalJWT = requestObj.headers.get("Bearer-JWT")
-        cookie = requestObj.cookies.get("auth")
         userUIDTupList = mysqlPool.execute(f'SELECT user_uid from user_info where username="{username}"')
         if userUIDTupList and userUIDTupList[0]:
             userUID = userUIDTupList[0][0].decode()
-            cookieJWTTupList = mysqlPool.execute(f'SELECT cookie, external_jwt from user_device_auth where user_uid="{userUID}"')
-            if not cookieJWTTupList or not cookieJWTTupList[0]:
+            JWTTupList = mysqlPool.execute(f'SELECT external_jwt from user_device_auth where user_uid="{userUID}"')
+            if not JWTTupList or not JWTTupList[0]:
                 statusDesc = "AUTH_NOT_FOUND"
             else:
-                savedCookie, savedExternalJWT = cookieJWTTupList[0]
-                savedCookie = savedCookie.decode()
+                savedExternalJWT = JWTTupList[0][0]
                 savedExternalJWT = savedExternalJWT.decode()
-                if cookie != savedCookie or savedExternalJWT != externalJWT:
+                if savedExternalJWT != externalJWT:
                     statusDesc = "INCORRECT_AUTH"
                 else:
                     internalJWTTupList = mysqlPool.execute(f'SELECT internal_jwt from user_connection_auth where user_uid="{userUID}"')
@@ -351,7 +301,7 @@ def registerRaw():
     logger.success("SENT", f"{request.url_rule} response sent to {request.remote_addr}")
     return (
         CustomResponse()
-        .readValues(statusCode, statusDesc, authData, authData["COOKIE"])
+        .readValues(statusCode, statusDesc, authData)
         .createFlaskResponse()
     )
 
@@ -364,9 +314,7 @@ def authenticateRaw():
     statusCode, statusDesc, authData = baseAuthRaw(request)
     logger.success("SENT", f"{request.url_rule} response sent to {request.remote_addr}")
     return (
-        CustomResponse()
-        .readValues(statusCode, statusDesc, authData, authData["COOKIE"])
-        .createFlaskResponse()
+        CustomResponse().readValues(statusCode, statusDesc, authData).createFlaskResponse()
     )
 
 
@@ -416,6 +364,14 @@ def recogniseRoute(username, userUID, deviceUID):
     return CustomResponse().readValues(statusCode, statusDesc, data.get("DATA")).createFlaskResponse()
 
 
+
+@userGateway.route(f"/demo", methods=["POST", "GET"])
+def demo():
+    string = request.user_agent
+    print(type(string.string), string.string, str(string), sep="\n")
+    return string.string
+
+
 @userGateway.before_request
 def userBeforeRequest():
     address = "BANNED"
@@ -433,6 +389,7 @@ def userBeforeRequest():
     request.remote_addr = address
     # print(request.headers.get("JWT"))
     # print(request.environ)
+
 
 print(f"USER GATEWAY: {Constants.userGatewayPort.value}")
 Thread(target=connectDB).start()
