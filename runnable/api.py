@@ -107,7 +107,7 @@ def attachExpiry(itemList: list) -> tuple[int, str, dict]:
 
 def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
     """
-    Tries all known GPT response types and processes the final image recognized JSON from GPT response
+    Tries all known GPT response types and processes the final image recognized JSON from GPT response^
     :param responseContent: Response from GPT
     :return: status code and list of processed items
     """
@@ -146,7 +146,7 @@ def parse_expiry_suggestions(responseContent: str) -> Dict[str, datetime]:
 
 def parse_str_to_datetime(duration_str) -> datetime:
     """
-    Parses a duration string (e.g., "30 D", "2 W", "3 M") and returns a relativedelta object.
+    Parses a duration string (e.g., "30 D", "2 W", "3 M") and returns a datetime object.
     - "D" stands for days
     - "W" stands for weeks
     - "M" stands for months
