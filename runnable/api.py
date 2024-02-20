@@ -96,10 +96,13 @@ def attachExpiry(itemList: list) -> tuple[int, str, dict]:
             expiryAttachedDict[item] = duration
         else:
             unknownItems.append(item)
-    GPTFetchedDuration = fetchDurationGPT(unknownItems)
-    for item in GPTFetchedDuration:
-        expiryAttachedDict[item] = GPTFetchedDuration[item]
-    return 200, "", expiryAttachedDict
+
+    statusCode, statusDesc, itemsWithGPTExpiryDate = fetchDurationGPT(unknownItems)
+    if statusCode == 200:
+        expiryAttachedDict.update(itemsWithGPTExpiryDate)
+        return 200, "", expiryAttachedDict
+    else:
+        return 500, "DUR_UNAVAILABLE", expiryAttachedDict
 
 
 def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
