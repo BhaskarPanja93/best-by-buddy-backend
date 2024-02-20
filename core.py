@@ -3,7 +3,7 @@ from gevent import monkey
 monkey.patch_all()
 
 from threading import Thread
-from typing import Dict
+from typing import Dict, Any
 from gevent.pywsgi import WSGIServer
 from flask import Flask, request, Request
 from PIL import Image
@@ -14,17 +14,27 @@ from json import loads
 from functools import wraps
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, date
+from dotenv import load_dotenv
+from openai import OpenAI
+import uuid
+from pathlib import Path
 
-from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods
+from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods, Tasks
 from internal.Logger import Logger
 from internal.StringGenerator import randomGenerator
 from internal.CustomResponse import CustomResponse
 from internal.MysqlPool import mysqlPool as MySQLPool
 
+load_dotenv()
+
+
+client = OpenAI()
+
 STATIC_FOLDER = "savedimages/"
 LOGIN_REQUIRED = False
 COMPRESS_IMAGES = False
 RECOGNISE_IMAGE = False
+USE_DUMMY_IMAGE = False
 RECOGNISE_DATES = False
 ATTACH_IMAGES = False
 DELETE_IMAGE_FILES = False
@@ -87,7 +97,15 @@ def fetchDurationDB(itemName: str) -> tuple[int, str, str]:
 
 def attachExpiry(itemList: list) -> tuple[int, str, dict]:
     if not RECOGNISE_DATES:
-        return 200, "DUMMY_DATES", {"APPLE":date(2024, 2, 27), "BANANA":date(2024, 2, 27), "PAPAYA":date(2024, 2, 27)}
+        return (
+            200,
+            "DUMMY_DATES",
+            {
+                "APPLE": date(2024, 2, 27),
+                "BANANA": date(2024, 2, 27),
+                "PAPAYA": date(2024, 2, 27),
+            },
+        )
 
     expiryAttachedDict = {}
     unknownItems = []
@@ -108,7 +126,17 @@ def attachExpiry(itemList: list) -> tuple[int, str, dict]:
 
 def attachImageURL(itemList: dict) -> tuple[int, str, dict]:
     if not ATTACH_IMAGES:
-        return 200, "DUMMY_FINAL", {"APPLE": {"IMG":"http://someimage.jpg", "EXPIRES": date(2024, 2, 27)}, "BANANA": {"IMG":"http://someimage2.jpg", "EXPIRES": date(2024, 2, 29)}}
+        return (
+            200,
+            "DUMMY_FINAL",
+            {
+                "APPLE": {"IMG": "http://someimage.jpg", "EXPIRES": date(2024, 2, 27)},
+                "BANANA": {
+                    "IMG": "http://someimage2.jpg",
+                    "EXPIRES": date(2024, 2, 29),
+                },
+            },
+        )
 
     expiryAttachedDict = {}
     unknownItems = []
@@ -189,7 +217,17 @@ def parse_str_to_datetime(duration_str) -> datetime:
 
 def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
     if not RECOGNISE_IMAGE:
-        return 200, "DUMMY_EXPIRY_DATES", {"APPLE": {"IMG":"http://someimage.jpg", "EXPIRES": date(2024, 2, 27)}, "BANANA": {"IMG":"http://someimage2.jpg", "EXPIRES": date(2024, 2, 29)}}
+        return (
+            200,
+            "DUMMY_EXPIRY_DATES",
+            {
+                "APPLE": {"IMG": "http://someimage.jpg", "EXPIRES": date(2024, 2, 27)},
+                "BANANA": {
+                    "IMG": "http://someimage2.jpg",
+                    "EXPIRES": date(2024, 2, 29),
+                },
+            },
+        )
 
     payload = {
         "max_tokens": 1000,
@@ -204,8 +242,8 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
                         "text": f""" 
                         You are given a list of groceries. For each item in the provided list, determine 
                         a typical expiry period and assign a duration string formatted as follows: 
-                        '<NUMBER> M/W/D', where the duration is expressed in either Month(s) ('M'), Week(s) or Day(s) 
-                        ('D'). Only use one unit of time for each item.
+                        '<NUMBER> M/W/D', where the duration is expressed in either Month(s) ('M'), Week(s) ('W') or 
+                        Day(s) ('D'). Only use one unit of time for each item.
                         
                         Based on these durations, create a dictionary mapping each grocery item to its respective 
                         duration string. Then, serialize this dictionary into a JSON string.
@@ -230,7 +268,7 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
         ],
     }
     statusCode, statusDesc, itemsWithExpiryDate = send_request(
-        payload=payload, is_image=False
+        payload=payload, task=Tasks.text_gen
     )
 
     return statusCode, statusDesc, itemsWithExpiryDate
@@ -277,11 +315,15 @@ def recogniseImageGPT(imgBytes: bytes) -> tuple[int, str, list]:
             }
         ],
     }
-    statusCode, statusDesc, recognisedItemList = send_request(payload, is_image=True)
+    statusCode, statusDesc, recognisedItemList = send_request(
+        payload, task=Tasks.img_understanding
+    )
     return statusCode, statusDesc, recognisedItemList
 
 
-def send_request(payload, is_image) -> tuple[int, str, list | dict[str, date]]:
+def send_request(
+    payload: Dict[str, Any], task: Tasks
+) -> tuple[int, str, list | dict[str, date]]:
     try:
         gtpSession = Session()
         gtpSession.headers = GPTElements.headers.value
@@ -289,21 +331,65 @@ def send_request(payload, is_image) -> tuple[int, str, list | dict[str, date]]:
             "https://api.openai.com/v1/chat/completions", json=payload
         ).json()
         responseContent = responseJSON["choices"][0]["message"]["content"]
-        if is_image:
-            statusCode, statusDesc, response = understandGPTResponseImage(
-                responseContent
-            )
-        else:  # Text
-            statusCode, statusDesc, response = understandGPTResponseText(
-                responseContent
-            )
-
+        match task:
+            case Tasks.img_understanding:
+                statusCode, statusDesc, response = understandGPTResponseImage(
+                    responseContent
+                )
+            case Tasks.text_gen:
+                statusCode, statusDesc, response = understandGPTResponseText(
+                    responseContent
+                )
     except Exception as e:
         statusCode = 422
         statusDesc = "GPT_POST_ERROR"
         logger.fatal("GPTPOST", repr(e))
-        response = [] if is_image else {}
+        response = [] if task == Tasks.img_understanding else {}
     return statusCode, statusDesc, response
+
+
+def generate_icon(item_name: str) -> tuple[int, str, Any]:
+    if USE_DUMMY_IMAGE:
+        return 200, "DUMMY_IMAGE", Path(STATIC_FOLDER, "apple.jpg")
+
+    response = client.images.generate(
+        model="dall-e-3",
+        prompt=f"Generate an icon for '{item_name}'",
+        size="1024x1024",
+        quality="standard",
+        n=1,
+    )
+
+    image_url = response.data[0].url
+
+    statusCode, statusDesc, icon_uid = download_image()
+
+    return statusCode, statusDesc, icon_uid
+
+
+def download_image():
+    pass
+
+
+def generate_item_uid(item_name):
+    """
+    Generates a unique identifier for an item by combining a UUID with the item's name.
+
+    Parameters:
+    - item_name: The name of the item (e.g., "Apple", "Banana").
+
+    Returns:
+    A tuple containing the unique identifier (item_uid) and the path to the item's icon.
+    """
+    # Generate a unique UUID
+    unique_id = str(uuid.uuid4())
+    # Create the item_uid by combining the UUID with the item name
+    item_uid = f"{unique_id}-{item_name}"
+
+    # Assuming a simple function to get the path to an item's icon based on its name
+    icon_path = get_icon_path(item_name)
+
+    return item_uid, icon_path
 
 
 def saveImage(imgBytes, purchaseUID) -> None:
@@ -327,7 +413,6 @@ def saveImage(imgBytes, purchaseUID) -> None:
         logger.info("IMGSAVE", f"Dummy image")
 
 
-
 def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
     """
     All image processing starts here. Fetches files from flask request and starts the recognizing process.
@@ -341,8 +426,12 @@ def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
     if statusCode == 200:
         while True:
             purchaseUID = randomGenerator().AlphaNumeric(50, 51)
-            if not mysqlPool.execute(f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'):
-                mysqlPool.execute(f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})")
+            if not mysqlPool.execute(
+                f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'
+            ):
+                mysqlPool.execute(
+                    f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})"
+                )
                 break
         Thread(
             target=saveImage,
@@ -399,9 +488,7 @@ def matchInternalJWT(flaskFunction):
         else:
             userUID, deviceUID = "", ""
 
-
         return flaskFunction(userUID, deviceUID)
-
 
     return wrapper
 
@@ -419,12 +506,16 @@ def recogniseRoute(userUID, deviceUID):
     request.environ["USER_UID"] = userUID
     request.environ["DEVICE_UID"] = deviceUID
     statusCode, statusDesc, recognisedData = baseRecognise(request)
-    logger.success("SENT",f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}")
+    logger.success(
+        "SENT",
+        f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",
+    )
     return (
         CustomResponse()
         .readValues(statusCode, statusDesc, recognisedData)
         .createFlaskResponse()
     )
+
 
 print(f"CORE: {Constants.coreServerPort.value}")
 connectDB()
@@ -446,14 +537,10 @@ WSGIServer(
 #     )
 
 # # Example output from fetchDurationGPT:
-# (
-#     200,
-#     "",
-#     {
-#         "Pineapple": datetime(2024, 2, 27, 0, 30, 39, 226634),
-#         "Banana": datetime(2024, 2, 27, 0, 30, 39, 226634),
-#         "Chicken thigh": datetime(2024, 2, 22, 0, 30, 39, 226634),
-#         "Pork ribs": datetime(2024, 2, 23, 0, 30, 39, 226634),
-#         "Fresh lentils": datetime(2024, 3, 20, 0, 30, 39, 226634),
-#     },
-# )
+# (200,
+#  '',
+#  {'Banana': datetime.date(2024, 2, 27),
+#   'Chicken thigh': datetime.date(2024, 2, 27),
+#   'Fresh lentils': datetime.date(2024, 4, 20),
+#   'Pineapple': datetime.date(2024, 2, 27),
+#   'Pork ribs': datetime.date(2024, 3, 5)})
