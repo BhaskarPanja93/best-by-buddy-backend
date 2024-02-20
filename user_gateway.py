@@ -28,6 +28,7 @@ ALLOW_ANY_REQ_TYPE = True
 LOGIN_REQUIRED = False
 ALLOW_ALL_IPS = True
 ALLOW_LOCALHOST = False
+FETCH_IMAGE = False
 
 ### internal checker
 DBReady = False
@@ -299,39 +300,37 @@ def baseAuthRaw(requestObj: Request) -> tuple[int, str, dict]:
 
 
 def getInternalJWT(requestObj: Request) -> tuple[int, str, str]:
-    username = commonMethods.sqlISafe(requestObj.headers.get("username"))
-    externalJWT = requestObj.headers.get("Bearer-JWT")
-    cookie = requestObj.cookies.get("auth")
-    userUIDTupList = mysqlPool.execute(
-        f'SELECT user_uid from user_info where username="{username}"'
-    )
     internalJWT = ""
     statusCode = 403
-    if not userUIDTupList or not userUIDTupList[0]:
-        statusDesc = "INCORRECT_USERNAME"
+    statusDesc = "INCORRECT_USERNAME"
+    if not LOGIN_REQUIRED:
+        statusCode = 200
+        statusDesc = ""
+        username, externalJWT, cookie = "", "", ""
     else:
-        userUID = userUIDTupList[0][0].decode()
-        cookieJWTTupList = mysqlPool.execute(
-            f'SELECT cookie, external_jwt from user_device_auth where user_uid="{userUID}"'
-        )
-        if not cookieJWTTupList or not cookieJWTTupList[0]:
-            statusDesc = "AUTH_NOT_FOUND"
-        else:
-            savedCookie, savedExternalJWT = cookieJWTTupList[0]
-            savedCookie = savedCookie.decode()
-            savedExternalJWT = savedExternalJWT.decode()
-            if cookie != savedCookie or savedExternalJWT != externalJWT:
-                statusDesc = "INCORRECT_AUTH"
+        username = commonMethods.sqlISafe(requestObj.headers.get("username"))
+        externalJWT = requestObj.headers.get("Bearer-JWT")
+        cookie = requestObj.cookies.get("auth")
+        userUIDTupList = mysqlPool.execute(f'SELECT user_uid from user_info where username="{username}"')
+        if userUIDTupList and userUIDTupList[0]:
+            userUID = userUIDTupList[0][0].decode()
+            cookieJWTTupList = mysqlPool.execute(f'SELECT cookie, external_jwt from user_device_auth where user_uid="{userUID}"')
+            if not cookieJWTTupList or not cookieJWTTupList[0]:
+                statusDesc = "AUTH_NOT_FOUND"
             else:
-                internalJWTTupList = mysqlPool.execute(
-                    f'SELECT internal_jwt from user_connection_auth where user_uid="{userUID}"'
-                )
-                if not userUIDTupList or not userUIDTupList[0]:
-                    statusDesc = "CORE_REJECTED_AUTH"
+                savedCookie, savedExternalJWT = cookieJWTTupList[0]
+                savedCookie = savedCookie.decode()
+                savedExternalJWT = savedExternalJWT.decode()
+                if cookie != savedCookie or savedExternalJWT != externalJWT:
+                    statusDesc = "INCORRECT_AUTH"
                 else:
-                    statusCode = 200
-                    statusDesc = ""
-                    internalJWT = internalJWTTupList[0][0].decode()
+                    internalJWTTupList = mysqlPool.execute(f'SELECT internal_jwt from user_connection_auth where user_uid="{userUID}"')
+                    if not userUIDTupList or not userUIDTupList[0]:
+                        statusDesc = "CORE_REJECTED_AUTH"
+                    else:
+                        statusCode = 200
+                        statusDesc = ""
+                        internalJWT = internalJWTTupList[0][0].decode()
     return statusCode, statusDesc, internalJWT
 
 
@@ -380,21 +379,22 @@ def recogniseRoute(username, userUID, deviceUID):
     statusCode, statusDesc, internalJWT = getInternalJWT(request)
     imgBytes = b""
     data = ""
-    try:
-        imgBytes = request.files.get("IMG_DATA").stream.read()
-        statusCode = 200
-        statusDesc = ""
-        logger.success("IMAGE_EXTRACT", f"in Files SIZE: {len(imgBytes)}")
-    except:
+    if FETCH_IMAGE:
         try:
-            imgBytes = b64decode(loads(request.data)["IMG_DATA"])
+            imgBytes = request.files.get("IMG_DATA").stream.read()
             statusCode = 200
             statusDesc = ""
-            logger.success("IMAGE_EXTRACT", f"in Data Size: {len(imgBytes)}")
+            logger.success("IMAGE_EXTRACT", f"in Files SIZE: {len(imgBytes)}")
         except:
-            statusCode = 500
-            statusDesc = "IMG_NOT_FOUND"
-            logger.fatal("IMAGE_EXTRACT", f"failed")
+            try:
+                imgBytes = b64decode(loads(request.data)["IMG_DATA"])
+                statusCode = 200
+                statusDesc = ""
+                logger.success("IMAGE_EXTRACT", f"in Data Size: {len(imgBytes)}")
+            except:
+                statusCode = 500
+                statusDesc = "IMG_NOT_FOUND"
+                logger.fatal("IMAGE_EXTRACT", f"failed")
     if statusCode == 200:
         header = {
             "INTERNAL-JWT": internalJWT,

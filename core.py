@@ -26,6 +26,7 @@ LOGIN_REQUIRED = False
 COMPRESS_IMAGES = False
 RECOGNISE_IMAGE = False
 RECOGNISE_DATES = False
+ATTACH_IMAGES = False
 DELETE_IMAGE_FILES = False
 
 mysqlPool: MySQLPool | None = None
@@ -85,6 +86,30 @@ def fetchDurationDB(itemName: str) -> tuple[int, str, str]:
 
 
 def attachExpiry(itemList: list) -> tuple[int, str, dict]:
+    if not RECOGNISE_DATES:
+        return 200, "DUMMY_DATES", {"APPLE":date(2024, 2, 27), "BANANA":date(2024, 2, 27), "PAPAYA":date(2024, 2, 27)}
+
+    expiryAttachedDict = {}
+    unknownItems = []
+    for item in itemList:
+        statusCode, statusDesc, duration = fetchDurationDB(item)
+        if statusCode == 200:
+            expiryAttachedDict[item] = duration
+        else:
+            unknownItems.append(item)
+
+    statusCode, statusDesc, itemsWithGPTExpiryDate = fetchDurationGPT(unknownItems)
+    if statusCode == 200:
+        expiryAttachedDict.update(itemsWithGPTExpiryDate)
+        return 200, "", expiryAttachedDict
+    else:
+        return 500, "DUR_UNAVAILABLE", expiryAttachedDict
+
+
+def attachImageURL(itemList: dict) -> tuple[int, str, dict]:
+    if not ATTACH_IMAGES:
+        return 200, "DUMMY_FINAL", {"APPLE": {"IMG":"http://someimage.jpg", "EXPIRES": date(2024, 2, 27)}, "BANANA": {"IMG":"http://someimage2.jpg", "EXPIRES": date(2024, 2, 29)}}
+
     expiryAttachedDict = {}
     unknownItems = []
     for item in itemList:
@@ -164,7 +189,7 @@ def parse_str_to_datetime(duration_str) -> datetime:
 
 def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
     if not RECOGNISE_IMAGE:
-        return 200, "DUMMY_EXPIRY_DATES", {'Banana': date(2024, 2, 27),'Chicken thigh': date(2024, 2, 27)}
+        return 200, "DUMMY_EXPIRY_DATES", {"APPLE": {"IMG":"http://someimage.jpg", "EXPIRES": date(2024, 2, 27)}, "BANANA": {"IMG":"http://someimage2.jpg", "EXPIRES": date(2024, 2, 29)}}
 
     payload = {
         "max_tokens": 1000,
@@ -288,15 +313,19 @@ def saveImage(imgBytes, purchaseUID) -> None:
     :param imgBytes: bytes received from the client
     :return: None
     """
-    imgObj = Image.open(BytesIO(imgBytes))
-    imgObj = imgObj.convert("RGB")
-    imgObj.save(
-        f"{STATIC_FOLDER}{purchaseUID}",
-        optimize=True,
-        quality=50 if COMPRESS_IMAGES else 100,
-        format="JPEG",
-    )
-    logger.success("IMGSAVE", f"{purchaseUID} saved")
+    if imgBytes:
+        imgObj = Image.open(BytesIO(imgBytes))
+        imgObj = imgObj.convert("RGB")
+        imgObj.save(
+            f"{STATIC_FOLDER}{purchaseUID}",
+            optimize=True,
+            quality=50 if COMPRESS_IMAGES else 100,
+            format="JPEG",
+        )
+        logger.success("IMGSAVE", f"{purchaseUID} saved")
+    else:
+        logger.info("IMGSAVE", f"Dummy image")
+
 
 
 def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
@@ -305,18 +334,15 @@ def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
     :param requestObj: Flask Request object
     :return: statusCode and the final processed json/dict
     """
-    itemDict = {}
     imgBytes = requestObj.data
     statusCode, statusDesc, itemList = recogniseImageGPT(imgBytes)
+    statusCode, statusDesc, itemDict = attachExpiry(itemList)
+    statusCode, statusDesc, itemDict = attachImageURL(itemDict)
     if statusCode == 200:
         while True:
             purchaseUID = randomGenerator().AlphaNumeric(50, 51)
-            if mysqlPool.execute(
-                f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'
-            ):
-                mysqlPool.execute(
-                    f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})"
-                )
+            if not mysqlPool.execute(f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'):
+                mysqlPool.execute(f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})")
                 break
         Thread(
             target=saveImage,
@@ -325,7 +351,7 @@ def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
                 purchaseUID,
             ),
         ).start()
-        statusCode, statusDesc, itemDict = attachExpiry(itemList)
+
     return statusCode, statusDesc, itemDict
 
 
@@ -389,13 +415,11 @@ def recogniseRoute(userUID, deviceUID):
     :param deviceUID:
     :return:
     """
+    logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
     request.environ["USER_UID"] = userUID
     request.environ["DEVICE_UID"] = deviceUID
     statusCode, statusDesc, recognisedData = baseRecognise(request)
-    logger.success(
-        "SENT",
-        f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",
-    )
+    logger.success("SENT",f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}")
     return (
         CustomResponse()
         .readValues(statusCode, statusDesc, recognisedData)

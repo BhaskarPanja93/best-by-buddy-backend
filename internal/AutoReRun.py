@@ -97,6 +97,7 @@ class AutoReRun(Thread):
                 _process.kill()
                 _process.wait()
                 self.currentProcesses.remove(_process)
+        sleep(2)
         for program in self.programsToRun:
             self.currentProcesses.append(
                 Popen([executable, program] + self.programsToRun[program])
