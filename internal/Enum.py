@@ -1,6 +1,8 @@
 from enum import Enum
 from pathlib import Path
+
 folderLocation = "D:\\testing\\best-by-buddy\\"
+
 
 class RequiredFiles(Enum):
     common = [
@@ -15,7 +17,6 @@ class RequiredFiles(Enum):
     coreFile = Path(folderLocation, r"core.py")
     userGatewayFile = Path(folderLocation, r"user_gateway.py")
     adminGatewayFile = Path(folderLocation, r"admin_gateway.py")
-
 
 
 class Constants(Enum):

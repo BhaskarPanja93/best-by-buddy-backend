@@ -97,7 +97,15 @@ def fetchDurationDB(itemName: str) -> tuple[int, str, str]:
 
 def attachExpiry(itemList: list) -> tuple[int, str, dict]:
     if not RECOGNISE_DATES:
-        return 200, "DUMMY_DATES", {"APPLE":date(2024, 2, 27), "BANANA":date(2024, 2, 27), "PAPAYA":date(2024, 2, 27)}
+        return (
+            200,
+            "DUMMY_DATES",
+            {
+                "APPLE": date(2024, 2, 27),
+                "BANANA": date(2024, 2, 27),
+                "PAPAYA": date(2024, 2, 27),
+            },
+        )
 
     expiryAttachedDict = {}
     unknownItems = []
@@ -118,7 +126,17 @@ def attachExpiry(itemList: list) -> tuple[int, str, dict]:
 
 def attachImageURL(itemList: dict) -> tuple[int, str, dict]:
     if not ATTACH_IMAGES:
-        return 200, "DUMMY_FINAL", {"APPLE": {"IMG":"http://someimage.jpg", "EXPIRES": date(2024, 2, 27)}, "BANANA": {"IMG":"http://someimage2.jpg", "EXPIRES": date(2024, 2, 29)}}
+        return (
+            200,
+            "DUMMY_FINAL",
+            {
+                "APPLE": {"IMG": "http://someimage.jpg", "EXPIRES": date(2024, 2, 27)},
+                "BANANA": {
+                    "IMG": "http://someimage2.jpg",
+                    "EXPIRES": date(2024, 2, 29),
+                },
+            },
+        )
 
     expiryAttachedDict = {}
     unknownItems = []
@@ -408,8 +426,12 @@ def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
     if statusCode == 200:
         while True:
             purchaseUID = randomGenerator().AlphaNumeric(50, 51)
-            if not mysqlPool.execute(f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'):
-                mysqlPool.execute(f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})")
+            if not mysqlPool.execute(
+                f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'
+            ):
+                mysqlPool.execute(
+                    f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})"
+                )
                 break
         Thread(
             target=saveImage,
@@ -466,9 +488,7 @@ def matchInternalJWT(flaskFunction):
         else:
             userUID, deviceUID = "", ""
 
-
         return flaskFunction(userUID, deviceUID)
-
 
     return wrapper
 
@@ -486,12 +506,16 @@ def recogniseRoute(userUID, deviceUID):
     request.environ["USER_UID"] = userUID
     request.environ["DEVICE_UID"] = deviceUID
     statusCode, statusDesc, recognisedData = baseRecognise(request)
-    logger.success("SENT",f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}")
+    logger.success(
+        "SENT",
+        f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",
+    )
     return (
         CustomResponse()
         .readValues(statusCode, statusDesc, recognisedData)
         .createFlaskResponse()
     )
+
 
 print(f"CORE: {Constants.coreServerPort.value}")
 connectDB()

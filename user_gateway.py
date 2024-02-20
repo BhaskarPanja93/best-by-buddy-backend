@@ -1,5 +1,3 @@
-
-
 from gevent import monkey
 
 monkey.patch_all()
@@ -311,10 +309,14 @@ def getInternalJWT(requestObj: Request) -> tuple[int, str, str]:
         username = commonMethods.sqlISafe(requestObj.headers.get("username"))
         externalJWT = requestObj.headers.get("Bearer-JWT")
         cookie = requestObj.cookies.get("auth")
-        userUIDTupList = mysqlPool.execute(f'SELECT user_uid from user_info where username="{username}"')
+        userUIDTupList = mysqlPool.execute(
+            f'SELECT user_uid from user_info where username="{username}"'
+        )
         if userUIDTupList and userUIDTupList[0]:
             userUID = userUIDTupList[0][0].decode()
-            cookieJWTTupList = mysqlPool.execute(f'SELECT cookie, external_jwt from user_device_auth where user_uid="{userUID}"')
+            cookieJWTTupList = mysqlPool.execute(
+                f'SELECT cookie, external_jwt from user_device_auth where user_uid="{userUID}"'
+            )
             if not cookieJWTTupList or not cookieJWTTupList[0]:
                 statusDesc = "AUTH_NOT_FOUND"
             else:
@@ -324,7 +326,9 @@ def getInternalJWT(requestObj: Request) -> tuple[int, str, str]:
                 if cookie != savedCookie or savedExternalJWT != externalJWT:
                     statusDesc = "INCORRECT_AUTH"
                 else:
-                    internalJWTTupList = mysqlPool.execute(f'SELECT internal_jwt from user_connection_auth where user_uid="{userUID}"')
+                    internalJWTTupList = mysqlPool.execute(
+                        f'SELECT internal_jwt from user_connection_auth where user_uid="{userUID}"'
+                    )
                     if not userUIDTupList or not userUIDTupList[0]:
                         statusDesc = "CORE_REJECTED_AUTH"
                     else:
@@ -404,16 +408,21 @@ def recogniseRoute(username, userUID, deviceUID):
         }
         try:
             data = post(
-                        f"http://127.0.0.1:{Constants.coreServerPort.value}/{Routes.imgRecv.value}",
-                        headers=header, data=imgBytes
-                    ).json()
-            logger.success("CORE_FWD", f"{request.url_rule} sent to {request.remote_addr}")
+                f"http://127.0.0.1:{Constants.coreServerPort.value}/{Routes.imgRecv.value}",
+                headers=header,
+                data=imgBytes,
+            ).json()
+            logger.success(
+                "CORE_FWD", f"{request.url_rule} sent to {request.remote_addr}"
+            )
         except Exception as e:
             print(repr(e))
             statusCode = 500
             statusDesc = "CORE_DOWN"
             logger.fatal("CORE_FWD", f"Unable to connect")
-    return CustomResponse().readValues(statusCode, statusDesc, data).createFlaskResponse()
+    return (
+        CustomResponse().readValues(statusCode, statusDesc, data).createFlaskResponse()
+    )
 
 
 @userGateway.before_request
@@ -433,6 +442,7 @@ def userBeforeRequest():
     request.remote_addr = address
     # print(request.headers.get("JWT"))
     # print(request.environ)
+
 
 print(f"USER GATEWAY: {Constants.userGatewayPort.value}")
 Thread(target=connectDB).start()
