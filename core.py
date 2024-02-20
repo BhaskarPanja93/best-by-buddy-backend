@@ -19,6 +19,7 @@ from openai import OpenAI
 import uuid
 from pathlib import Path
 import requests
+from pprint import pprint
 
 from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods, Tasks
 from internal.Logger import Logger
@@ -26,7 +27,7 @@ from internal.StringGenerator import randomGenerator
 from internal.CustomResponse import CustomResponse
 from internal.MysqlPool import mysqlPool as MySQLPool
 
-load_dotenv()
+load_dotenv()  # Name the key of the entry in .env of the OpenAI API "OPENAI_API_KEY"
 
 
 client = OpenAI()
@@ -125,35 +126,34 @@ def attachExpiry(itemList: list) -> tuple[int, str, dict]:
         return 500, "DUR_UNAVAILABLE", expiryAttachedDict
 
 
-def attachImageURL(itemList: dict) -> tuple[int, str, dict]:
+def attachImageURL(itemDict: dict, item_id) -> tuple[int, str, dict]:
     if not ATTACH_IMAGES:
         return (
             200,
             "DUMMY_FINAL",
             {
-                "APPLE": {"IMG": "http://someimage.jpg", "EXPIRES": date(2024, 2, 27)},
-                "BANANA": {
+                "UUID-987654321": {
+                    "NAME": "Apple",
+                    "IMG": "http://someimage.jpg",
+                    "EXPIRES": date(2024, 2, 27),
+                },
+                "UUID-123456789": {
+                    "NAME": "BANANA",
                     "IMG": "http://someimage2.jpg",
                     "EXPIRES": date(2024, 2, 29),
                 },
             },
         )
 
-    expiryAttachedDict = {}
-    unknownItems = []
-    for item in itemList:
-        statusCode, statusDesc, duration = fetchDurationDB(item)
-        if statusCode == 200:
-            expiryAttachedDict[item] = duration
-        else:
-            unknownItems.append(item)
+    item_uid_dict = dict()
+    try:
+        for item_name in itemDict:
+            statusCode, statusDesc, icon_uid = generate_icon(item_name, item_id)
+            item_uid_dict[item_name] = icon_uid
 
-    statusCode, statusDesc, itemsWithGPTExpiryDate = fetchDurationGPT(unknownItems)
-    if statusCode == 200:
-        expiryAttachedDict.update(itemsWithGPTExpiryDate)
-        return 200, "", expiryAttachedDict
-    else:
-        return 500, "DUR_UNAVAILABLE", expiryAttachedDict
+        return 200, "", item_uid_dict
+    except:
+        return 422, "GPT_POST_ERROR", {}
 
 
 def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
@@ -355,14 +355,20 @@ def generate_icon(item_name: str) -> tuple[int, str, Any]:
         return 200, "DUMMY_IMAGE", Path(STATIC_FOLDER, "apple.jpg")
 
     response = client.images.generate(
-        model="dall-e-3",
-        prompt=f"Generate an icon for '{item_name}'",
-        size="1024x1024",
+        model="dall-e-2",
+        prompt=f"""
+        Create a simple and sleek icon sized of a {item_name}. Ensure the design is straightforward 
+        showing just the {item_name}. The design should emphasize simplicity, elegance, and a modern aesthetic. Do 
+        not add anything else but the food item there. The item should be should be centered on a plain, 
+        white background. """,
+        size="256x256",
         quality="standard",
         n=1,
     )
 
     image_url = response.data[0].url
+
+    logger.info(response.json)
 
     statusCode, statusDesc, icon_uid = download_image(image_url)
 
@@ -383,7 +389,7 @@ def download_image(image_url: str):
     item_uid = generate_item_uid()
 
     if response.status_code == 200:
-        save_path = Path(STATIC_FOLDER, item_uid)
+        save_path = Path(STATIC_FOLDER, item_uid).with_suffix(".png")
 
         with open(save_path, "wb") as file:
             file.write(response.content)
@@ -547,11 +553,7 @@ WSGIServer(
 
 
 # if __name__ == "__main__":
-#     pprint(
-#         fetchDurationGPT(
-#             ["Pineapple", "Banana", "Chicken thigh", "Pork ribs", "Fresh lentils"]
-#         )
-#     )
+#     pprint(generate_icon("Apple"))
 
 # # Example output from fetchDurationGPT:
 # (200,
