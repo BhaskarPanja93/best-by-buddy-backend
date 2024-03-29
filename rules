@@ -24,16 +24,13 @@ SERVER CLIENT AUTH:
 to auth using username password:
     POST req -> /baseauth
         json has to have "username" "password"
-    response has {"COOKIE":{"DEVICE-COOKIE":""}, "JWT":{"DEVICE-JWT":""}, "DEVICE":{"DEVICE-UID":"}}
+    response has {"JWT":{"DEVICE-JWT":""}, "DEVICE":{"DEVICE-UID":"}}
     use these 2 values next time onwards
-    cookie -> DEVICE_COOKIE
     header -> USERNAME
     header -> BEARER-JTW
 
 
-
 JWT header key: Bearer-JWT
 username header key: username
-device auth cookie key: DEVICE_COOKIE
 
 

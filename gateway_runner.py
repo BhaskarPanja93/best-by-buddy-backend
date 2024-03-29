@@ -1,7 +1,4 @@
-from internal.AutoReRun import AutoReRun
+from autoReRun import Runner as AutoReRunner
 from internal.Enum import RequiredFiles
 
-AutoReRun(
-    {RequiredFiles.userGatewayFile.value: []}, [RequiredFiles.common.value]
-).start()
-# AutoReRun({RequiredFiles.adminGatewayFile.value: []}, [RequiredFiles.common.value], 1).start()
+AutoReRunner({RequiredFiles.userGatewayFile.value: []}, RequiredFiles.common.value.__add__([RequiredFiles.userGatewayFile.value])).start()

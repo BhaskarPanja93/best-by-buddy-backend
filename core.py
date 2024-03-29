@@ -1,7 +1,7 @@
 from gevent import monkey
-
 monkey.patch_all()
 
+from random import randrange
 from threading import Thread
 from typing import Dict, Any
 from gevent.pywsgi import WSGIServer
@@ -10,150 +10,31 @@ from PIL import Image
 from io import BytesIO
 from base64 import b64encode
 from requests import Session
-from json import loads
+from json import loads, dumps
 from functools import wraps
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, date
-from dotenv import load_dotenv
 from openai import OpenAI
-import uuid
 from pathlib import Path
-import requests
-from pprint import pprint
+from customisedLogs import Manager as LogManager
+from randomisedString import Generator as StrGen
 
-from internal.Enum import Routes, GPTElements, Constants, Secrets, commonMethods, Tasks
-from internal.Logger import Logger
-from internal.StringGenerator import randomGenerator
+from internal.Enum import Routes, RequestElements, Constants, commonMethods, Tasks, RequiredFiles, Response200Messages, Response422Messages, Response403Messages, Response500Messages
+from internal.SecretEnum import Secrets
 from internal.CustomResponse import CustomResponse
-from internal.MysqlPool import mysqlPool as MySQLPool
-
-load_dotenv()  # Name the key of the entry in .env of the OpenAI API "OPENAI_API_KEY"
 
 
-client = OpenAI()
-
-STATIC_FOLDER = "savedimages/"
-LOGIN_REQUIRED = False
+LOGIN_REQUIRED = True
 COMPRESS_IMAGES = False
-RECOGNISE_IMAGE = False
-USE_DUMMY_IMAGE = False
-RECOGNISE_DATES = False
-ATTACH_IMAGES = False
-DELETE_IMAGE_FILES = False
+DUMMY_RECOGNISER = True
+DUMMY_EXPIRY = True
 
-mysqlPool: MySQLPool | None = None
-logger = Logger()
-stringGen = randomGenerator()
+
+clientOPENAI = OpenAI(api_key=Secrets.GPT4APIKey.value)
+logger = LogManager()
+stringGen = StrGen()
 recognitionServer = Flask("RECOGNITION_API")
-activeFiles = set()
-
-
-def connectDB() -> None:
-    """
-    Blocking function to connect to DB and check connection
-    :return: None
-    """
-    global mysqlPool
-    for host in ["127.0.0.1"]:
-        try:
-            mysqlPool = MySQLPool(
-                user="root",
-                password=Secrets.DBPassword.value,
-                dbName="bestbybuddy",
-                host=host,
-            )
-            mysqlPool.execute("show databases")
-            logger.success("DB", f"connected to: {host}")
-            break
-        except:
-            logger.critical("DB", f"failed: {host}")
-    else:
-        logger.fatal("DB", "Unable to connect to bestbybuddy")
-        input("EXIT...")
-        exit(0)
-
-
-def fetchDurationDB(itemName: str) -> tuple[int, str, str]:
-    """
-    Fetch Duration from database or return None
-    :param itemName:
-    :return:
-    """
-    statusCode = 500
-    statusDesc = "DUR_UNAVAILABLE"
-    itemDuration = ""
-    itemUIDTupList = mysqlPool.execute(
-        f'SELECT item_uid from known_items where name="{itemName}"'
-    )
-    if itemUIDTupList and itemUIDTupList[0][0]:
-        itemUID = itemUIDTupList[0][0]
-        itemDurationTupList = mysqlPool.execute(
-            f'SELECT duration from known_items where item_uid="{itemUID}"'
-        )
-        if itemDurationTupList and itemUIDTupList[0][0]:
-            itemDuration = itemDurationTupList[0][0]
-            statusCode = 200
-            statusDesc = ""
-    return statusCode, statusDesc, itemDuration
-
-
-def attachExpiry(itemList: list) -> tuple[int, str, dict]:
-    if not RECOGNISE_DATES:
-        return (
-            200,
-            "DUMMY_DATES",
-            {
-                "APPLE": date(2024, 2, 27),
-                "BANANA": date(2024, 2, 27),
-                "PAPAYA": date(2024, 2, 27),
-            },
-        )
-
-    expiryAttachedDict = {}
-    unknownItems = []
-    for item in itemList:
-        statusCode, statusDesc, duration = fetchDurationDB(item)
-        if statusCode == 200:
-            expiryAttachedDict[item] = duration
-        else:
-            unknownItems.append(item)
-
-    statusCode, statusDesc, itemsWithGPTExpiryDate = fetchDurationGPT(unknownItems)
-    if statusCode == 200:
-        expiryAttachedDict.update(itemsWithGPTExpiryDate)
-        return 200, "", expiryAttachedDict
-    else:
-        return 500, "DUR_UNAVAILABLE", expiryAttachedDict
-
-
-def attachImageURL(itemDict: dict, item_id) -> tuple[int, str, dict]:
-    if not ATTACH_IMAGES:
-        return (
-            200,
-            "DUMMY_FINAL",
-            {
-                "UUID-987654321": {
-                    "NAME": "Apple",
-                    "IMG": "http://someimage.jpg",
-                    "EXPIRES": date(2024, 2, 27),
-                },
-                "UUID-123456789": {
-                    "NAME": "BANANA",
-                    "IMG": "http://someimage2.jpg",
-                    "EXPIRES": date(2024, 2, 29),
-                },
-            },
-        )
-
-    item_uid_dict = dict()
-    try:
-        for item_name in itemDict:
-            statusCode, statusDesc, icon_uid = generate_icon(item_name, item_id)
-            item_uid_dict[item_name] = icon_uid
-
-        return 200, "", item_uid_dict
-    except:
-        return 422, "GPT_POST_ERROR", {}
+mysqlPool = commonMethods.connectDB(logger)
 
 
 def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
@@ -171,64 +52,30 @@ def understandGPTResponseImage(responseContent: str) -> tuple[int, str, list]:
         return 422, "PARSE_FAIL", []
 
 
-def understandGPTResponseText(
-    responseContent: str,
-) -> tuple[int, str, Dict[str, date]]:
-    """
-    Tries all known GPT response types and processes the final expiry date recommendations recognized from the given
-    JSON from GPT response
-    :param responseContent: Response from GPT
-    :return: status code and dictionary of items with suggested expiry date
-    """
-    try:
-        return 200, "", parse_expiry_suggestions(responseContent)
-    except:
-        return 422, "PARSE_FAIL", {}
-
-
-def parse_expiry_suggestions(responseContent: str) -> Dict[str, date]:
-    parsed = dict()
-    mapping = loads(responseContent)
-    for item, expiry_date in mapping.items():
-        parsed[item] = parse_str_to_datetime(duration_str=expiry_date).date()
-
-    return parsed
-
-
-def parse_str_to_datetime(duration_str) -> datetime:
-    """
-    Parses a duration string (e.g., "30 D", "2 W", "3 M") and returns a datetime object.
-    - "D" stands for days
-    - "W" stands for weeks
-    - "M" stands for months
-    """
-    num, unit = duration_str.split()
-    num = int(num)
-    now = datetime.now()
-
-    if unit == "D":
-        return now + relativedelta(days=num)
-    elif unit == "W":
-        return now + relativedelta(weeks=num)
-    elif unit == "M":
-        return now + relativedelta(months=num)
-    else:
-        raise ValueError("Unknown duration unit")
-
-
 def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
-    if not RECOGNISE_IMAGE:
-        return (
-            200,
-            "DUMMY_EXPIRY_DATES",
-            {
-                "APPLE": {"IMG": "http://someimage.jpg", "EXPIRES": date(2024, 2, 27)},
-                "BANANA": {
-                    "IMG": "http://someimage2.jpg",
-                    "EXPIRES": date(2024, 2, 29),
-                },
-            },
-        )
+    """
+    Convert list of items to dictionary of item and its expiry
+    :param itemList:
+    :return:
+    """
+    if DUMMY_EXPIRY:
+        d1 = date(2024, 3, 27)
+        d2 = date(2024, 2, 29)
+        d3 = date(2024, 3, 11)
+        d4 = date(2024, 3, 1)
+        d5 = date(2024, 4, 14)
+        d6 = date(2024, 2, 28)
+        return (200, "DUMMY_EXPIRY_DATES",
+                {"PURCHASE_UID": "iubsefiyavfiaw",
+                 "ITEMS":
+                     {"asgsgsg": {"NAME": "Apple", "IMG": "http://someimage.jpg", "EXPIRES": f"{str(d1.year).zfill(4)}-{str(d1.month).zfill(2)}-{str(d1.day).zfill(2)}"},
+                      "awegddhdrh": {"NAME": "Banana", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d2.year).zfill(4)}-{str(d2.month).zfill(2)}-{str(d2.day).zfill(2)}"},
+                      "wefher": {"NAME": "Potato", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d3.year).zfill(4)}-{str(d3.month).zfill(2)}-{str(d3.day).zfill(2)}"},
+                      "wegwhre": {"NAME": "Milk", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d4.year).zfill(4)}-{str(d4.month).zfill(2)}-{str(d4.day).zfill(2)}"},
+                      "segrhetrj": {"NAME": "Papaya", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d5.year).zfill(4)}-{str(d5.month).zfill(2)}-{str(d5.day).zfill(2)}"},
+                      "dtyjuykytj": {"NAME": "Meat", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d6.year).zfill(4)}-{str(d6.month).zfill(2)}-{str(d6.day).zfill(2)}"}}
+                 },
+                )
 
     payload = {
         "max_tokens": 1000,
@@ -243,22 +90,23 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
                         "text": f""" 
                         You are given a list of groceries. For each item in the provided list, determine 
                         a typical expiry period and assign a duration string formatted as follows: 
-                        '<NUMBER> M/W/D', where the duration is expressed in either Month(s) ('M'), Week(s) ('W') or 
+                        '<NUMBER> Y/M/W/D', where the duration is expressed in either Year(s) ('Y'), Month(s) ('M'), Week(s) ('W') or 
                         Day(s) ('D'). Only use one unit of time for each item.
-                        
+
                         Based on these durations, create a dictionary mapping each grocery item to its respective 
                         duration string. Then, serialize this dictionary into a JSON string.
-                        
+
                         Ensure the duration for each item is realistic, based on common knowledge about how long 
                         these items typically last before expiring.
-                        
+
                         Input list of groceries (provided as a list of strings):
                         {itemList}
-                        
+
                         Example Output JSON (with hypothetical, not actually correct durations, just to show correct 
                         use of duration format):
                         {{ 
-                            "Apple": "1 W", 
+                            "Apple": "2 W", 
+                            "Banana": "1 Y", 
                             "Grape": "4 D", 
                             "Egg": "1 M" 
                         }} 
@@ -268,154 +116,196 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
             }
         ],
     }
-    statusCode, statusDesc, itemsWithExpiryDate = send_request(
-        payload=payload, task=Tasks.text_gen
-    )
-
+    statusCode, statusDesc, itemsWithExpiryDate = sendGPTRequest(payload=payload, task=Tasks.text_gen)
     return statusCode, statusDesc, itemsWithExpiryDate
 
 
-def recogniseImageGPT(imgBytes: bytes) -> tuple[int, str, list]:
+def recogniseImageGPT(imgBytes: bytes, userUID: str) -> tuple[int, str, dict]:
     """
     Fetch list of items in the image from GPT, or a dummy response if asked for
+    :param userUID: User ID which sent the image
     :param imgBytes: raw bytes of the image file received from client.
     :return:
     """
-    if not RECOGNISE_IMAGE:
-        return 200, "DUMMY_IMAGE_RECOGNISER", ["APPLE", "BANANA", "PAPAYA"]
-
-    payload = {
-        "max_tokens": 300,
-        "model": "gpt-4-vision-preview",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": """
-                        You are given an image of groceries. 
-                        Create a list of common names of all items included in the image and output only the python 
-                        JSON list. Name each item only in the singular.
-                        Do not output anything but the JSON. 
-                    
-                        Example JSON:
-                            groceries = [
-                                "Apple",
-                                "Grape",
-                                "Yogurt"
-                            ]""",
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64encode(imgBytes).decode()}",
-                            "detail": "low",
+    if DUMMY_RECOGNISER:
+        purchaseUID, statusCode, statusDesc, recognisedItemList = "", 200, Response200Messages.dummyRecogniser.value, ["APPLE", "BANANA", "MILK", "MEAT"]
+    else:
+        payload = {
+            "max_tokens": 300,
+            "model": "gpt-4-vision-preview",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": """
+                            You are given an image of groceries. 
+                            Create a list of common names of all items included in the image, in their singular form, and output only the python 
+                            JSON list. Name each item only in the singular.
+                            Do not output anything but the JSON. 
+    
+                            Example JSON:
+                                groceries = [
+                                    "Apple",
+                                    "Grape",
+                                    "Yogurt"
+                                ]""",
                         },
-                    },
-                ],
-            }
-        ],
-    }
-    statusCode, statusDesc, recognisedItemList = send_request(
-        payload, task=Tasks.img_understanding
-    )
-    return statusCode, statusDesc, recognisedItemList
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{b64encode(imgBytes).decode()}",
+                                "detail": "low",
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+        statusCode, statusDesc, recognisedItemList = sendGPTRequest(payload, task=Tasks.img_understanding)
+        while True:
+            purchaseUID = stringGen.AlphaNumeric(50, 51)
+            if not mysqlPool.execute(f"SELECT purchase_uid from purchases where purchase_uid=\"{purchaseUID}\""):
+                mysqlPool.execute(f"INSERT INTO purchases values (\"{purchaseUID}\", \"{userUID}\", '{dumps(recognisedItemList)}', '{dumps([])}')")
+                break
+        Thread(target=savePurchaseImage, args=(imgBytes, purchaseUID,)).start()
+    itemDict = {}
+    for itemName in recognisedItemList:
+        _, __, itemUID = itemNameToUID(itemName)
+        itemDict[itemUID] = itemName
+    return statusCode, statusDesc, {"PURCHASE_UID":purchaseUID, "ITEMS": itemDict}
 
 
-def send_request(
-    payload: Dict[str, Any], task: Tasks
-) -> tuple[int, str, list | dict[str, date]]:
+def sendGPTRequest(payload: Dict[str, Any], task: Tasks) -> tuple[int, str, list | dict[str, date]]:
+    """
+    Common method to send request to GPT.
+    :param payload: Data to send
+    :param task: Purpose of sending
+    :return:
+    """
+    statusCode, statusDesc = 500, Response500Messages.dummy.value
+    response:list|dict[str, date] = []
     try:
         gtpSession = Session()
-        gtpSession.headers = GPTElements.headers.value
-        responseJSON = gtpSession.post(
-            "https://api.openai.com/v1/chat/completions", json=payload
-        ).json()
+        gtpSession.headers = RequestElements.GPTHeaders.value
+        responseJSON = gtpSession.post("https://api.openai.com/v1/chat/completions", json=payload).json()
         responseContent = responseJSON["choices"][0]["message"]["content"]
         match task:
             case Tasks.img_understanding:
-                statusCode, statusDesc, response = understandGPTResponseImage(
-                    responseContent
-                )
+                statusCode, statusDesc, response = understandGPTResponseImage(responseContent)
             case Tasks.text_gen:
-                statusCode, statusDesc, response = understandGPTResponseText(
-                    responseContent
-                )
+                statusCode, statusDesc, response = 200, Response200Messages.correct.value, loads(responseContent)
     except Exception as e:
         statusCode = 422
-        statusDesc = "GPT_POST_ERROR"
+        statusDesc = Response422Messages.postErrorGPT.value
         logger.fatal("GPTPOST", repr(e))
         response = [] if task == Tasks.img_understanding else {}
     return statusCode, statusDesc, response
 
 
-def generate_icon(item_name: str) -> tuple[int, str, Any]:
-    if USE_DUMMY_IMAGE:
-        return 200, "DUMMY_IMAGE", Path(STATIC_FOLDER, "apple.jpg")
-
-    response = client.images.generate(
-        model="dall-e-2",
-        prompt=f"""
-        Create a simple and sleek icon sized of a {item_name}. Ensure the design is straightforward 
-        showing just the {item_name}. The design should emphasize simplicity, elegance, and a modern aesthetic. Do 
-        not add anything else but the food item there. The item should be should be centered on a plain, 
-        white background. """,
-        size="256x256",
-        quality="standard",
-        n=1,
-    )
-
-    image_url = response.data[0].url
-
-    logger.info(response.json)
-
-    statusCode, statusDesc, icon_uid = download_image(image_url)
-
-    return statusCode, statusDesc, icon_uid
-
-
-def download_image(image_url: str):
+def itemNameToUID(itemName:str):
     """
-    Downloads an image generated by DALL·E 3 from a given URL and saves it to a static path with the name being a UUID.
-
-    Parameters:
-    - image_url: The URL of the image generated by the DALL·E 3 API.
-
-    Returns:
-    None
+    Fetch UID for any item name, or generate a new one if name not exists
+    :param itemName: Name of the item to ask for UID
+    :return:
     """
-    response = requests.get(image_url)
-    item_uid = generate_item_uid()
-
-    if response.status_code == 200:
-        save_path = Path(STATIC_FOLDER, item_uid).with_suffix(".png")
-
-        with open(save_path, "wb") as file:
-            file.write(response.content)
-            logger.success(f"Image successfully downloaded and saved to {save_path}")
-            statusCode, statusDesc = 200, ""
-
+    itemUIDTupList =  mysqlPool.execute(f"SELECT item_uid from known_items where name=\"{itemName}\"")
+    if not itemUIDTupList or not itemUIDTupList[0]:
+        while True:
+            itemUID = stringGen.AlphaNumeric(50, 51)
+            if not mysqlPool.execute(f"SELECT item_uid from known_items where item_uid=\"{itemUID}\""):
+                mysqlPool.execute(f"INSERT INTO known_items (item_uid, name) values (\"{itemUID}\", \"{itemName}\")")
+                break
     else:
-        logger.fatal(
-            f"Failed to download the image. HTTP Status Code: '{response.status_code}' with reason '{response.reason}'"
-        )
-        statusCode, statusDesc = 500, "IMG_NOT_FOUND"
-
-    return statusCode, statusDesc, item_uid
+        itemUID = itemUIDTupList[0][0].decode()
+    return 200, "", itemUID
 
 
-def generate_item_uid() -> str:
+def fetchDurationDB(itemName: str) -> tuple[int, str, str]:
     """
-    Generates a unique identifier for an item.
-
-    Returns:
-    Unique identifier (item_uid)
+    Fetch Duration from database or return None
+    :param itemName:
+    :return:
     """
-    return str(uuid.uuid4())
+    statusCode = 500
+    statusDesc = Response500Messages.durationNotFound.value
+    itemDuration = ""
+    itemUIDTupList = mysqlPool.execute(f"SELECT item_uid from known_items where name=\"{itemName}\"")
+    if itemUIDTupList and itemUIDTupList[0][0]:
+        itemUID = itemUIDTupList[0][0].decode()
+        itemDurationTupList = mysqlPool.execute(f"SELECT duration from known_items where item_uid=\"{itemUID}\"")
+        if itemDurationTupList and itemUIDTupList[0][0]:
+            itemDuration = itemDurationTupList[0][0]
+            if itemDuration is not None:
+                statusCode = 200
+                statusDesc = Response200Messages.correct.value
+    return statusCode, statusDesc, itemDuration
 
 
-def saveImage(imgBytes, purchaseUID) -> None:
+def attachExpiry(purchaseItemDict: dict) -> tuple[int, str, dict]:
+    itemDict = purchaseItemDict["ITEMS"]
+    if DUMMY_EXPIRY:
+        statusCode, statusDesc = 200, Response200Messages.dummyExpiry.value
+        expiryDict = {}
+        for itemUID in itemDict:
+            itemName = itemDict[itemUID]
+            d = date(randrange(2024, 2025), randrange(1, 13), randrange(1, 29))
+            expiryDict[itemUID] = {"NAME":itemName, "EXPIRES": f"{str(d.year).zfill(4)}-{str(d.month).zfill(2)}-{str(d.day).zfill(2)}"}
+    else:
+        statusCode, statusDesc = 200, Response200Messages.correct.value
+        expiryDict = {}
+        unknownItems = []
+        nameToUID = {}
+        for itemUID in itemDict:
+            itemName = itemDict[itemUID]
+            nameToUID[itemName] = itemUID
+            expiryDict[itemUID] = {"NAME":itemName}
+            statusCode, statusDesc, duration = fetchDurationDB(itemName)
+            if expiryDict == 200:
+                expiryDict[itemUID]["EXPIRES"] = durationStrToExpiryStr(duration)
+            else:
+                unknownItems.append(itemName)
+        if unknownItems:
+            statusCode, statusDesc, GPTFetchedExpiry = fetchDurationGPT(unknownItems)
+            if statusCode == 200:
+                for itemName in GPTFetchedExpiry:
+                    mysqlPool.execute(f"UPDATE known_items set duration=\"{GPTFetchedExpiry[itemName]}\" where item_uid=\"{nameToUID[itemName]}\"")
+                    expiryDict[nameToUID[itemName]]["EXPIRES"] = durationStrToExpiryStr(GPTFetchedExpiry[itemName])
+
+    expiryAttachedDict = purchaseItemDict
+    expiryAttachedDict["ITEMS"] = expiryDict
+    return statusCode, statusDesc, expiryAttachedDict
+
+
+def durationStrToExpiryStr(duration_str) -> str:
+    """
+    Parses a duration string (e.g., "30 D", "2 W", "3 M", "2 Y") and returns a datetime object.
+    - "D" stands for days
+    - "W" stands for weeks
+    - "M" stands for months
+    - "Y" stands for years
+    """
+    try:
+        num, unit = duration_str.split()
+        num, unit = int(num), unit.strip().upper()
+    except:
+        unit = duration_str[-1]
+        num = duration_str[:-1]
+    now = datetime.now()
+    expires = datetime.now()
+    if unit == "D":
+        expires = now + relativedelta(days=num)
+    elif unit == "W":
+        expires = now + relativedelta(weeks=num)
+    elif unit == "M":
+        expires = now + relativedelta(months=num)
+    elif unit == "Y":
+        expires = now + relativedelta(years=num)
+    return f"{str(expires.year).zfill(4)}-{str(expires.month).zfill(2)}-{str(expires.day).zfill(2)}"
+
+
+def savePurchaseImage(imgBytes, purchaseUID) -> None:
     """
     Save the image for future reference
     :param purchaseUID: purchase UID or image UID
@@ -425,8 +315,9 @@ def saveImage(imgBytes, purchaseUID) -> None:
     if imgBytes:
         imgObj = Image.open(BytesIO(imgBytes))
         imgObj = imgObj.convert("RGB")
+        pathToSave = Path(RequiredFiles.purchaseImageFolder.value, purchaseUID).with_suffix(".jpg")
         imgObj.save(
-            f"{STATIC_FOLDER}{purchaseUID}",
+            pathToSave,
             optimize=True,
             quality=50 if COMPRESS_IMAGES else 100,
             format="JPEG",
@@ -436,35 +327,18 @@ def saveImage(imgBytes, purchaseUID) -> None:
         logger.info("IMGSAVE", f"Dummy image")
 
 
-def baseRecognise(requestObj: Request) -> tuple[int, str, dict]:
+def baseRecognise(requestObj: Request|bytes) -> tuple[int, str, dict]:
     """
     All image processing starts here. Fetches files from flask request and starts the recognizing process.
     :param requestObj: Flask Request object
     :return: statusCode and the final processed json/dict
     """
     imgBytes = requestObj.data
-    statusCode, statusDesc, itemList = recogniseImageGPT(imgBytes)
-    statusCode, statusDesc, itemDict = attachExpiry(itemList)
-    statusCode, statusDesc, itemDict = attachImageURL(itemDict)
-    if statusCode == 200:
-        while True:
-            purchaseUID = randomGenerator().AlphaNumeric(50, 51)
-            if not mysqlPool.execute(
-                f'SELECT purchase_uid from purchases where purchase_uid="{purchaseUID}"'
-            ):
-                mysqlPool.execute(
-                    f"INSERT INTO purchases values (\"{purchaseUID}\", \"{request.environ.get('USER_UID')}\", {itemList}, {{}})"
-                )
-                break
-        Thread(
-            target=saveImage,
-            args=(
-                imgBytes,
-                purchaseUID,
-            ),
-        ).start()
-
-    return statusCode, statusDesc, itemDict
+    userUID = requestObj.environ.get('USER-UID')
+    logger.success("IMAGE_EXTRACT", f"SIZE: {len(imgBytes)}")
+    statusCode, statusDescRecogniser, purchaseItemDict = recogniseImageGPT(imgBytes, userUID)
+    statusCode, statusDescExpiry, itemDict = attachExpiry(purchaseItemDict)
+    return statusCode, f"{statusDescRecogniser}_{statusDescExpiry}", itemDict
 
 
 def matchInternalJWT(flaskFunction):
@@ -473,8 +347,7 @@ def matchInternalJWT(flaskFunction):
     :param flaskFunction: the function to switch context to if auth succeeds
     :return:
     """
-
-    def __checkJWTCorrectness(request):
+    def __checkJWTCorrectness(request:Request):
         """
         Fetch values from request and match with DB
         :param request: Flask Request object
@@ -484,13 +357,13 @@ def matchInternalJWT(flaskFunction):
         deviceUID = commonMethods.sqlISafe(request.headers.get("DEVICE-UID"))
         userUID = commonMethods.sqlISafe(request.headers.get("USER-UID"))
         internalJWT = commonMethods.sqlISafe(request.headers.get("INTERNAL-JWT"))
-        userUIDTupList = mysqlPool.execute(
-            f'SELECT user_uid from user_info where username="{username}" and internal_jwt="{internalJWT}" and user_uid="{userUID}"'
-        )
-        if userUIDTupList and userUIDTupList[0]:
+        userUIDExpectedTupList  = mysqlPool.execute(f"SELECT user_uid from user_connection_auth where internal_jwt=\"{internalJWT}\" and user_uid=\"{userUID}\"")
+        userUIDReal = ""
+        if len(userUIDExpectedTupList) == 1:
+            userUIDReal = userUIDExpectedTupList[0][0].decode()
+        if username and deviceUID and userUID and internalJWT and userUIDReal and userUIDReal == userUID:
             return True, userUID, deviceUID
         return False, "", ""
-
     @wraps(flaskFunction)
     def wrapper():
         """
@@ -500,23 +373,17 @@ def matchInternalJWT(flaskFunction):
         if LOGIN_REQUIRED:
             jwtCorrect, userUID, deviceUID = __checkJWTCorrectness(request)
             if not jwtCorrect:
-                logger.critical("JWT", f"{request.url_rule} incorrect")
+                logger.failed("JWT", f"{request.url_rule} incorrect")
                 statusCode = 403
-                statusDesc = "SERVER_OOS"
-                return (
-                    CustomResponse()
-                    .readValues(statusCode, statusDesc, "")
-                    .createFlaskResponse()
-                )
+                statusDesc = Response403Messages.coreRejectedAuth.value
+                return CustomResponse().readValues(statusCode, statusDesc, "").createFlaskResponse()
         else:
             userUID, deviceUID = "", ""
-
         return flaskFunction(userUID, deviceUID)
-
     return wrapper
 
 
-@recognitionServer.route(f"/{Routes.imgRecv.value}", methods=["POST"])
+@recognitionServer.route(f"/{Routes.imgRecv.value}", methods=["POST", "GET"])
 @matchInternalJWT
 def recogniseRoute(userUID, deviceUID):
     """
@@ -526,40 +393,29 @@ def recogniseRoute(userUID, deviceUID):
     :return:
     """
     logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
-    request.environ["USER_UID"] = userUID
-    request.environ["DEVICE_UID"] = deviceUID
+    request.environ["USER-UID"] = userUID
+    request.environ["DEVICE-UID"] = deviceUID
     statusCode, statusDesc, recognisedData = baseRecognise(request)
-    logger.success(
-        "SENT",
-        f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",
-    )
-    return (
-        CustomResponse()
-        .readValues(statusCode, statusDesc, recognisedData)
-        .createFlaskResponse()
-    )
+    logger.success("SENT",f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",)
+    return CustomResponse().readValues(statusCode, statusDesc, recognisedData).createFlaskResponse()
+
+
+# @recognitionServer.route(f"/{Routes.requestNewItemUID.value}", methods=["POST"])
+# @matchInternalJWT
+# def createNewItemUIDRoute(userUID, deviceUID):
+#     """
+#     Add new item to known items
+#     :param userUID:
+#     :param deviceUID:
+#     :return:
+#     """
+#     logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
+#     request.environ["USER-UID"] = userUID
+#     request.environ["DEVICE-UID"] = deviceUID
+#     statusCode, statusDesc, newUID = itemNameToUID(request.form.get("ITEMNAME"))
+#     logger.success("SENT",f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",)
+#     return CustomResponse().readValues(statusCode, statusDesc, newUID).createFlaskResponse()
 
 
 print(f"CORE: {Constants.coreServerPort.value}")
-connectDB()
-WSGIServer(
-    (
-        "127.0.0.1",
-        Constants.coreServerPort.value,
-    ),
-    recognitionServer,
-    log=None,
-).serve_forever()
-
-
-# if __name__ == "__main__":
-#     pprint(generate_icon("Apple"))
-
-# # Example output from fetchDurationGPT:
-# (200,
-#  '',
-#  {'Banana': datetime.date(2024, 2, 27),
-#   'Chicken thigh': datetime.date(2024, 2, 27),
-#   'Fresh lentils': datetime.date(2024, 4, 20),
-#   'Pineapple': datetime.date(2024, 2, 27),
-#   'Pork ribs': datetime.date(2024, 3, 5)})
+WSGIServer(("127.0.0.1",Constants.coreServerPort.value,),recognitionServer,log=None,).serve_forever()
