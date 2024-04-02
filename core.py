@@ -58,25 +58,6 @@ def fetchDurationGPT(itemList: list) -> tuple[int, str, dict]:
     :param itemList:
     :return:
     """
-    if DUMMY_EXPIRY:
-        d1 = date(2024, 3, 27)
-        d2 = date(2024, 2, 29)
-        d3 = date(2024, 3, 11)
-        d4 = date(2024, 3, 1)
-        d5 = date(2024, 4, 14)
-        d6 = date(2024, 2, 28)
-        return (200, "DUMMY_EXPIRY_DATES",
-                {"PURCHASE_UID": "iubsefiyavfiaw",
-                 "ITEMS":
-                     {"asgsgsg": {"NAME": "Apple", "IMG": "http://someimage.jpg", "EXPIRES": f"{str(d1.year).zfill(4)}-{str(d1.month).zfill(2)}-{str(d1.day).zfill(2)}"},
-                      "awegddhdrh": {"NAME": "Banana", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d2.year).zfill(4)}-{str(d2.month).zfill(2)}-{str(d2.day).zfill(2)}"},
-                      "wefher": {"NAME": "Potato", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d3.year).zfill(4)}-{str(d3.month).zfill(2)}-{str(d3.day).zfill(2)}"},
-                      "wegwhre": {"NAME": "Milk", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d4.year).zfill(4)}-{str(d4.month).zfill(2)}-{str(d4.day).zfill(2)}"},
-                      "segrhetrj": {"NAME": "Papaya", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d5.year).zfill(4)}-{str(d5.month).zfill(2)}-{str(d5.day).zfill(2)}"},
-                      "dtyjuykytj": {"NAME": "Meat", "IMG": "http://someimage2.jpg", "EXPIRES": f"{str(d6.year).zfill(4)}-{str(d6.month).zfill(2)}-{str(d6.day).zfill(2)}"}}
-                 },
-                )
-
     payload = {
         "max_tokens": 1000,
         "model": "gpt-4-turbo-preview",
@@ -127,49 +108,46 @@ def recogniseImageGPT(imgBytes: bytes, userUID: str) -> tuple[int, str, dict]:
     :param imgBytes: raw bytes of the image file received from client.
     :return:
     """
-    if DUMMY_RECOGNISER:
-        purchaseUID, statusCode, statusDesc, recognisedItemList = "", 200, Response200Messages.dummyRecogniser.value, ["APPLE", "BANANA", "MILK", "MEAT"]
-    else:
-        payload = {
-            "max_tokens": 300,
-            "model": "gpt-4-vision-preview",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": """
-                            You are given an image of groceries. 
-                            Create a list of common names of all items included in the image, in their singular form, and output only the python 
-                            JSON list. Name each item only in the singular.
-                            Do not output anything but the JSON. 
-    
-                            Example JSON:
-                                groceries = [
-                                    "Apple",
-                                    "Grape",
-                                    "Yogurt"
-                                ]""",
+    payload = {
+        "max_tokens": 300,
+        "model": "gpt-4-vision-preview",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": """
+                        You are given an image of groceries. 
+                        Create a list of common names of all items included in the image, in their singular form, and output only the python 
+                        JSON list. Name each item only in the singular.
+                        Do not output anything but the JSON. 
+
+                        Example JSON:
+                            groceries = [
+                                "Apple",
+                                "Grape",
+                                "Yogurt"
+                            ]""",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{b64encode(imgBytes).decode()}",
+                            "detail": "low",
                         },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{b64encode(imgBytes).decode()}",
-                                "detail": "low",
-                            },
-                        },
-                    ],
-                }
-            ],
-        }
-        statusCode, statusDesc, recognisedItemList = sendGPTRequest(payload, task=Tasks.img_understanding)
-        while True:
-            purchaseUID = stringGen.AlphaNumeric(50, 51)
-            if not mysqlPool.execute(f"SELECT purchase_uid from purchases where purchase_uid=\"{purchaseUID}\""):
-                mysqlPool.execute(f"INSERT INTO purchases values (\"{purchaseUID}\", \"{userUID}\", '{dumps(recognisedItemList)}', '{dumps([])}')")
-                break
-        Thread(target=savePurchaseImage, args=(imgBytes, purchaseUID,)).start()
+                    },
+                ],
+            }
+        ],
+    }
+    statusCode, statusDesc, recognisedItemList = sendGPTRequest(payload, task=Tasks.img_understanding)
+    while True:
+        purchaseUID = stringGen.AlphaNumeric(50, 51)
+        if not mysqlPool.execute(f"SELECT purchase_uid from purchases where purchase_uid=\"{purchaseUID}\""):
+            mysqlPool.execute(f"INSERT INTO purchases values (\"{purchaseUID}\", \"{userUID}\", '{dumps(recognisedItemList)}', '{dumps([])}')")
+            break
+    Thread(target=savePurchaseImage, args=(imgBytes, purchaseUID,)).start()
     itemDict = {}
     for itemName in recognisedItemList:
         _, __, itemUID = itemNameToUID(itemName)
@@ -336,7 +314,8 @@ def baseRecognise(requestObj: Request|bytes) -> tuple[int, str, dict]:
     imgBytes = requestObj.data
     userUID = requestObj.environ.get('USER-UID')
     logger.success("IMAGE_EXTRACT", f"SIZE: {len(imgBytes)}")
-    statusCode, statusDescRecogniser, purchaseItemDict = recogniseImageGPT(imgBytes, userUID)
+    if DUMMY_RECOGNISER: statusCode, statusDescRecogniser, purchaseItemDict = 200, Response200Messages.dummyRecogniser.value, ["APPLE", "BANANA", "MILK", "MEAT"]
+    else: statusCode, statusDescRecogniser, purchaseItemDict = recogniseImageGPT(imgBytes, userUID)
     statusCode, statusDescExpiry, itemDict = attachExpiry(purchaseItemDict)
     return statusCode, f"{statusDescRecogniser}_{statusDescExpiry}", itemDict
 
