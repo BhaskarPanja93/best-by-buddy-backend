@@ -26,8 +26,8 @@ from internal.CustomResponse import CustomResponse
 
 LOGIN_REQUIRED = True
 COMPRESS_IMAGES = False
-DUMMY_RECOGNISER = True
-DUMMY_EXPIRY = True
+DUMMY_RECOGNISER = False
+DUMMY_EXPIRY = False
 
 
 clientOPENAI = OpenAI(api_key=Secrets.GPT4APIKey.value)
@@ -314,7 +314,7 @@ def baseRecognise(requestObj: Request|bytes) -> tuple[int, str, dict]:
     imgBytes = requestObj.data
     userUID = requestObj.environ.get('USER-UID')
     logger.success("IMAGE_EXTRACT", f"SIZE: {len(imgBytes)}")
-    if DUMMY_RECOGNISER: statusCode, statusDescRecogniser, purchaseItemDict = 200, Response200Messages.dummyRecogniser.value, ["APPLE", "BANANA", "MILK", "MEAT"]
+    if DUMMY_RECOGNISER: statusCode, statusDescRecogniser, purchaseItemDict = 200, Response200Messages.dummyRecogniser.value, {"PURCHASE_UID":"", "ITEMS": {"1":"APPLE", "2":"BANANA", "3":"MILK", "4":"MEAT"}}
     else: statusCode, statusDescRecogniser, purchaseItemDict = recogniseImageGPT(imgBytes, userUID)
     statusCode, statusDescExpiry, itemDict = attachExpiry(purchaseItemDict)
     return statusCode, f"{statusDescRecogniser}_{statusDescExpiry}", itemDict
@@ -362,7 +362,7 @@ def matchInternalJWT(flaskFunction):
     return wrapper
 
 
-@recognitionServer.route(f"/{Routes.imgRecv.value}", methods=["POST", "GET"])
+@recognitionServer.route(f"{Routes.imgRecv.value}", methods=["POST", "GET"])
 @matchInternalJWT
 def recogniseRoute(userUID, deviceUID):
     """
@@ -379,21 +379,21 @@ def recogniseRoute(userUID, deviceUID):
     return CustomResponse().readValues(statusCode, statusDesc, recognisedData).createFlaskResponse()
 
 
-# @recognitionServer.route(f"/{Routes.requestNewItemUID.value}", methods=["POST"])
-# @matchInternalJWT
-# def createNewItemUIDRoute(userUID, deviceUID):
-#     """
-#     Add new item to known items
-#     :param userUID:
-#     :param deviceUID:
-#     :return:
-#     """
-#     logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
-#     request.environ["USER-UID"] = userUID
-#     request.environ["DEVICE-UID"] = deviceUID
-#     statusCode, statusDesc, newUID = itemNameToUID(request.form.get("ITEMNAME"))
-#     logger.success("SENT",f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",)
-#     return CustomResponse().readValues(statusCode, statusDesc, newUID).createFlaskResponse()
+@recognitionServer.route(f"{Routes.requestNewItemUID.value}", methods=["POST"])
+@matchInternalJWT
+def createNewItemUIDRoute(userUID, deviceUID):
+    """
+    Add new item to known items
+    :param userUID:
+    :param deviceUID:
+    :return:
+    """
+    logger.skip("RECV", f"{request.url_rule} {request.remote_addr}")
+    request.environ["USER-UID"] = userUID
+    request.environ["DEVICE-UID"] = deviceUID
+    statusCode, statusDesc, newUID = itemNameToUID(request.form.get("ITEMNAME"))
+    logger.success("SENT",f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}",)
+    return CustomResponse().readValues(statusCode, statusDesc, newUID).createFlaskResponse()
 
 
 print(f"CORE: {Constants.coreServerPort.value}")

@@ -28,7 +28,7 @@ class RequiredFiles(Enum):
         r"internal\StringGenerator.py",
     ]
     coreFile = r"core.py"
-    userGatewayFile = r"user_gateway.py"
+    userGatewayFile = r"gateway.py"
     adminGatewayFile = r"admin_gateway.py"
     purchaseImageFolder = r"savedImages"
     thumbnailFolder = r"thumbnails"
@@ -36,19 +36,19 @@ class RequiredFiles(Enum):
 
 class Constants(Enum):
     logCount = 1000
-    userGatewayPort = 50000
-    adminGatewayPort = 50001
-    coreServerPort = 50002
+    userGatewayPort = 60200
+    adminGatewayPort = 60201
+    coreServerPort = 60202
 
 
 class Routes(Enum):
-    home = "bbb"
-    register = "bbb_register"
-    authRaw = "bbb_authraw"
-    renewAuth = "bbb_renewauth"
-    imgRecv = "bbb_imgrecv"
-    requestNewItemUID = "bbb_newitemuid"
-    confirmPurchase = "bbb_confirmPurchase"
+    home = "/bbb"
+    register = "/bbb_register"
+    authRaw = "/bbb_authraw"
+    renewAuth = "/bbb_renewauth"
+    imgRecv = "/bbb_imgrecv"
+    requestNewItemUID = "/bbb_newitemuid"
+    confirmPurchase = "/bbb_confirmPurchase"
 
 
 class RequestElements(Enum):

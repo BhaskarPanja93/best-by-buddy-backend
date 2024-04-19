@@ -1,5 +1,3 @@
-import datetime
-
 from gevent import monkey
 monkey.patch_all()
 
@@ -11,6 +9,7 @@ from requests import post
 from functools import wraps
 from flask_jwt_extended import create_access_token, JWTManager
 from cryptography.fernet import Fernet
+import datetime
 from json import loads
 from datetime import timedelta, datetime
 from time import sleep
@@ -26,7 +25,7 @@ ALLOW_ANY_REQ_METHOD = True
 LOGIN_REQUIRED = True
 UNBLOCK_ALL_IP = True
 ALLOW_LOCALHOST = True
-FETCH_IMAGE = False
+FETCH_IMAGE = True
 PENALISE_IP = False
 
 ### internal checker
@@ -68,6 +67,7 @@ def onlyAllowedIPs(flaskFunction):
         if expiryTupList and expiryTupList[0]: activePenalty = datetime.now()<expiryTupList[0][0]
         else: activePenalty = False
         if address in ["BANNED", "LOCAL" if not ALLOW_LOCALHOST else ""] or activePenalty:
+            logger.fatal("AUTH", f"address not allowed: {address}")
             return True
         return False
 
@@ -76,9 +76,9 @@ def onlyAllowedIPs(flaskFunction):
         if UNBLOCK_ALL_IP or not __isIPPenalised(request):
             return flaskFunction()
         else:
-            logger.failed("UNAUTHORISED", f"{request.url_rule} from {request.remote_addr}")
+            logger.failed("UNAUTHORISED", f"onlyAllowedIPs: {request.url_rule} from {request.remote_addr}")
             statusCode = 403
-            penaliseIP(commonMethods.sqlISafe(requestObj.remote_addr), 10)
+            penaliseIP(commonMethods.sqlISafe(request.remote_addr), 10)
             statusDesc = Response403Messages.penalisedIP.value
             return CustomResponse().readValues(statusCode, statusDesc, "").createFlaskResponse()
     return wrapper
@@ -101,6 +101,9 @@ def onlyAllowedAuth(flaskFunction):
                 if commonMethods.checkRelatedIP(addressDeviceUIDTupList[0][0], request.remote_addr):
                     deviceUID = addressDeviceUIDTupList[0][1].decode()
                     return True, username, userUID, deviceUID
+                else: logger.fatal("AUTH", f"address mismatch E:[{addressDeviceUIDTupList[0][0]}] R:[{request.remote_addr}] for {userUID} [{externalJWT}]")
+            else: logger.fatal("AUTH", f"no address, device_uid for {userUID} [{externalJWT}]")
+        else: logger.fatal("AUTH", f"no user_id for {username}")
         return False, "", "", ""
 
     @wraps(flaskFunction)
@@ -109,7 +112,7 @@ def onlyAllowedAuth(flaskFunction):
         if not LOGIN_REQUIRED or authCorrect:
             return flaskFunction(username, userUID, deviceID)
         else:
-            logger.failed("AUTH", f"{request.url_rule} from {request.remote_addr}")
+            logger.failed("AUTH", f"onlyAllowedAuth: {request.url_rule} from {request.remote_addr}")
             statusCode = 403
             statusDesc = Response403Messages.loginRequired.value
             penaliseIP(commonMethods.sqlISafe(request.remote_addr))
@@ -133,7 +136,7 @@ def onlyAllowedMethods(flaskFunction):
         if ALLOW_ANY_REQ_METHOD or __checkMethodCorrectness(request):
             return flaskFunction()
         else:
-            logger.failed("METHOD", f"{request.method} from {request.remote_addr}")
+            logger.failed("METHOD", f"onlyAllowedMethods: {request.method} from {request.remote_addr}")
             statusCode = 403
             statusDesc = "METHOD_INCORRECT"
             return CustomResponse().readValues(statusCode, statusDesc, "").createFlaskResponse()
@@ -263,7 +266,7 @@ def getInternalJWT(userUID:str) -> tuple[int, str, str]:
     return statusCode, statusDesc, internalJWT
 
 
-@userGateway.route(f"/{Routes.register.value}", methods=["POST", "GET"])
+@userGateway.route(f"{Routes.register.value}", methods=["POST", "GET"])
 @onlyAllowedMethods
 @onlyAllowedIPs
 def registerRawRoute():
@@ -273,7 +276,7 @@ def registerRawRoute():
     return CustomResponse().readValues(statusCode, statusDesc, authData).createFlaskResponse()
 
 
-@userGateway.route(f"/{Routes.authRaw.value}", methods=["POST", "GET"])
+@userGateway.route(f"{Routes.authRaw.value}", methods=["POST", "GET"])
 @onlyAllowedMethods
 @onlyAllowedIPs
 def authenticateRawRoute():
@@ -283,7 +286,7 @@ def authenticateRawRoute():
     return CustomResponse().readValues(statusCode, statusDesc, authData).createFlaskResponse()
 
 
-@userGateway.route(f"/{Routes.renewAuth.value}", methods=["POST", "GET"])
+@userGateway.route(f"{Routes.renewAuth.value}", methods=["POST", "GET"])
 @onlyAllowedMethods
 @onlyAllowedIPs
 @onlyAllowedAuth
@@ -292,7 +295,7 @@ def checkOldAuthRoute(username, userUID, deviceUID):
     return CustomResponse().readValues(200, Response200Messages.correct.value, "").createFlaskResponse()
 
 
-@userGateway.route(f"/{Routes.imgRecv.value}", methods=["POST", "GET"])
+@userGateway.route(f"{Routes.imgRecv.value}", methods=["POST", "GET"])
 @onlyAllowedMethods
 @onlyAllowedIPs
 @onlyAllowedAuth
@@ -313,7 +316,7 @@ def recogniseRoute(username, userUID, deviceUID):
                 logger.success("IMAGE_EXTRACT", f"in Data Size: {len(imgBytes)}")
             except:
                 data = CustomResponse().readValues(500, "IMG_NOT_FOUND", "").createDataDict()
-                penaliseIP(commonMethods.sqlISafe(requestObj.remote_addr))
+                penaliseIP(commonMethods.sqlISafe(request.remote_addr))
                 logger.fatal("IMAGE_EXTRACT", f"failed")
     if statusCode == 200:
         header = {
@@ -323,7 +326,7 @@ def recogniseRoute(username, userUID, deviceUID):
             "DEVICE-UID": deviceUID,
         }
         try:
-            data = post(f"http://127.0.0.1:{Constants.coreServerPort.value}/{Routes.imgRecv.value}", headers=header, data=imgBytes).json()
+            data = post(f"http://127.0.0.1:{Constants.coreServerPort.value}{Routes.imgRecv.value}", headers=header, data=imgBytes).json()
             logger.success("CORE_FWD", f"{request.url_rule} response [{statusCode}: {statusDesc}] sent to {request.remote_addr}")
         except:
             data = CustomResponse().readValues(500, Response500Messages.coreDown.value, "").createDataDict()
@@ -331,7 +334,7 @@ def recogniseRoute(username, userUID, deviceUID):
     return CustomResponse().readDict(data).createFlaskResponse()
 
 
-@userGateway.route(f"/{Routes.requestNewItemUID.value}", methods=["POST", "GET"])
+@userGateway.route(f"{Routes.requestNewItemUID.value}", methods=["POST", "GET"])
 @onlyAllowedMethods
 @onlyAllowedIPs
 @onlyAllowedAuth
@@ -372,5 +375,4 @@ def userBeforeRequest():
 
 
 print(f"USER GATEWAY: {Constants.userGatewayPort.value}")
-#userGateway.run("0.0.0.0", port=8000, debug=False)
 WSGIServer(("0.0.0.0",Constants.userGatewayPort.value,),userGateway,log=None,).serve_forever()

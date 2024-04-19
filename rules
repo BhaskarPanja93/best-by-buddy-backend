@@ -1,6 +1,6 @@
 HTTP STATUS CODES:
 
-200: "": correct response
+200: "CORRECT": correct response
 
 403: "IP_PENALTY": IP address has been penalised
      "LOGIN_REQ": Login Failed or not attempted, try logging in
