@@ -8,8 +8,7 @@ from ping3 import ping
 from internal.SecretEnum import Secrets
 
 
-possibleFolderLocation = ["C:\\24x7\\best-by-buddy\\", "C:\\FILES\\AllProjects\\Python\\best-by-buddy\\", "D:\\testing\\best-by-buddy\\"]
-for location in possibleFolderLocation:
+for location in Secrets.possibleFolderLocation.value:
     if Path(location).is_dir():
         folderLocation = location
         break
