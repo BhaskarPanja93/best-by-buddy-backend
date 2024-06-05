@@ -26,8 +26,8 @@ from internal.CustomResponse import CustomResponse
 
 LOGIN_REQUIRED = True
 COMPRESS_IMAGES = False
-DUMMY_RECOGNISER = False
-DUMMY_EXPIRY = False
+DUMMY_RECOGNISER = True
+DUMMY_EXPIRY = True
 
 
 clientOPENAI = OpenAI(api_key=Secrets.GPT4APIKey.value)
